@@ -11,19 +11,26 @@ import (
 
 // Profiler TODO
 type Profiler struct {
+	sync.RWMutex
 	Caller   string
 	GOID     int64
 	ParentID string
-	DataHash map[string]*ProfileData
+	DataHash map[string]*dataLockable
 	lastTag  string
 }
 
-// ProfileData TODO
-type ProfileData struct {
+// Data TODO
+type Data struct {
 	Tag        string
 	CallCount  int64
 	TSum       int64
 	tLastEnter int64
+}
+
+// dataLockable TODO
+type dataLockable struct {
+	sync.RWMutex
+	Data
 }
 
 var hashLock sync.Mutex
@@ -43,7 +50,7 @@ func retainProfiler() *Profiler {
 		p = &Profiler{
 			Caller:   Caller,
 			GOID:     GOID,
-			DataHash: map[string]*ProfileData{},
+			DataHash: map[string]*dataLockable{},
 		}
 		profilerHash[id] = p
 	}
@@ -79,14 +86,18 @@ func Enter() *Profiler {
 // EnterTag TODO
 func EnterTag(Tag string) *Profiler {
 	p := retainProfiler()
+	p.Lock()
 	p.lastTag = Tag
 	data, has := p.DataHash[Tag]
 	if !has {
-		data = &ProfileData{}
+		data = &dataLockable{}
 		p.DataHash[Tag] = data
 	}
+	p.Unlock()
+	data.Lock()
 	data.CallCount++
 	data.tLastEnter = time.Now().UnixNano()
+	data.Unlock()
 	//log.Println("Enter", Tag, p.ID())
 	return p
 }
@@ -94,29 +105,62 @@ func EnterTag(Tag string) *Profiler {
 // Exit TODO
 func (p *Profiler) Exit() {
 	defer releaseProfiler(p)
+	p.RLock()
 	data := p.DataHash[p.lastTag]
+	p.RUnlock()
 	TNow := time.Now().UnixNano()
+	data.Lock()
 	data.TSum += TNow - data.tLastEnter
+	data.Unlock()
 	//log.Println("Exit", p.lastTag, p.ID(), time.Duration(TNow-data.tLastEnter), time.Duration(data.TSum))
 }
 
-func caller(skip int) string {
-	// we get the callers as uintptrs - but we just need 1
-	fpcs := make([]uintptr, 1)
+// EachFunc TODO
+type EachFunc func(Caller string, GOID int64, tag string, data Data)
 
-	// skip 3 levels to get to the caller of whoever called Caller()
+// Each TODO
+func (p *Profiler) Each(fn EachFunc) {
+	hash := map[string]Data{}
+	p.RLock()
+	for tag, data := range p.DataHash {
+		data.Lock()
+		hash[tag] = data.Data
+		data.Unlock()
+	}
+	Caller := p.Caller
+	GOID := p.GOID
+	p.RUnlock()
+	for tag, data := range hash {
+		fn(Caller, GOID, tag, data)
+	}
+}
+
+// ReadFunc TODO
+type ReadFunc func(Caller string, GOID int64, data Data)
+
+// Read TODO
+func (p *Profiler) Read(Tag string, fn ReadFunc) {
+	p.RLock()
+	data := p.DataHash[Tag]
+	Caller := p.Caller
+	GOID := p.GOID
+	p.RUnlock()
+	data.Lock()
+	fn(Caller, GOID, data.Data)
+	data.Unlock()
+}
+
+func caller(skip int) string {
+	fpcs := make([]uintptr, 1)
 	n := runtime.Callers(skip, fpcs)
 	if n == 0 {
-		return "n/a" // proper error her would be better
+		return "nil"
 	}
 
-	// get the info of the actual function that's in the pointer
 	pc := fpcs[0] - 1
 	fun := runtime.FuncForPC(pc)
 	if fun == nil {
-		return "n/a"
+		return "nil"
 	}
-
-	// return its name
 	return fun.Name()
 }
