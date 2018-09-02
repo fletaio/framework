@@ -14,9 +14,12 @@ var hashLock sync.Mutex
 var profilerHash = map[string]*Profiler{}
 var stackHash = map[int64][]*Profiler{}
 
-func retainProfiler() *Profiler {
+func retainProfiler(ignoreGOID bool) *Profiler {
 	Caller, FileName, Line := caller(4)
-	GOID := gls.GoID()
+	var GOID int64
+	if !ignoreGOID {
+		GOID = gls.GoID()
+	}
 
 	hashLock.Lock()
 	defer hashLock.Unlock()
@@ -71,12 +74,22 @@ func (p *Profiler) ID() string {
 
 // Enter TODO
 func Enter() *Profiler {
-	return EnterTag("")
+	return EnterWithTag("", false)
 }
 
 // EnterTag TODO
 func EnterTag(Tag string) *Profiler {
-	p := retainProfiler()
+	return EnterWithTag(Tag, false)
+}
+
+// EnterWith TODO
+func EnterWith(ignoreGOID bool) *Profiler {
+	return EnterWithTag("", ignoreGOID)
+}
+
+// EnterWithTag TODO
+func EnterWithTag(Tag string, ignoreGOID bool) *Profiler {
+	p := retainProfiler(ignoreGOID)
 	p.Lock()
 	p.lastTag = Tag
 	data, has := p.dataHash[Tag]
