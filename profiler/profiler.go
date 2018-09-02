@@ -1,6 +1,7 @@
 package profiler
 
 import (
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"sync"
@@ -9,36 +10,12 @@ import (
 	"github.com/v2pro/plz/gls"
 )
 
-// Profiler TODO
-type Profiler struct {
-	sync.RWMutex
-	Caller   string
-	GOID     int64
-	ParentID string
-	DataHash map[string]*dataLockable
-	lastTag  string
-}
-
-// Data TODO
-type Data struct {
-	Tag        string
-	CallCount  int64
-	TSum       int64
-	tLastEnter int64
-}
-
-// dataLockable TODO
-type dataLockable struct {
-	sync.RWMutex
-	Data
-}
-
 var hashLock sync.Mutex
 var profilerHash = map[string]*Profiler{}
 var stackHash = map[int64][]*Profiler{}
 
 func retainProfiler() *Profiler {
-	Caller := caller(4)
+	Caller, FileName, Line := caller(4)
 	GOID := gls.GoID()
 
 	hashLock.Lock()
@@ -50,7 +27,9 @@ func retainProfiler() *Profiler {
 		p = &Profiler{
 			Caller:   Caller,
 			GOID:     GOID,
-			DataHash: map[string]*dataLockable{},
+			dataHash: map[string]*dataLockable{},
+			FileName: FileName,
+			Line:     Line,
 		}
 		profilerHash[id] = p
 	}
@@ -73,6 +52,18 @@ func releaseProfiler(p *Profiler) {
 	stackHash[p.GOID] = stack[:len(stack)-1]
 }
 
+// Profiler TODO
+type Profiler struct {
+	sync.RWMutex
+	Caller   string
+	FileName string
+	Line     int
+	GOID     int64
+	ParentID string
+	dataHash map[string]*dataLockable
+	lastTag  string
+}
+
 // ID TODO
 func (p *Profiler) ID() string {
 	return p.Caller + "#" + strconv.FormatInt(p.GOID, 10)
@@ -88,79 +79,167 @@ func EnterTag(Tag string) *Profiler {
 	p := retainProfiler()
 	p.Lock()
 	p.lastTag = Tag
-	data, has := p.DataHash[Tag]
+	data, has := p.dataHash[Tag]
 	if !has {
 		data = &dataLockable{}
-		p.DataHash[Tag] = data
+		p.dataHash[Tag] = data
 	}
 	p.Unlock()
+
 	data.Lock()
 	data.CallCount++
 	data.tLastEnter = time.Now().UnixNano()
 	data.Unlock()
-	//log.Println("Enter", Tag, p.ID())
+
 	return p
 }
 
 // Exit TODO
 func (p *Profiler) Exit() {
 	defer releaseProfiler(p)
+
+	sd := &SnapshotData{}
 	p.RLock()
-	data := p.DataHash[p.lastTag]
+	sd.ID = p.ID()
+	Caller := p.Caller
+	sd.FileName = p.FileName
+	sd.Line = p.Line
+	sd.ParentID = p.ParentID
+	sd.Tag = p.lastTag
+	data := p.dataHash[p.lastTag]
 	p.RUnlock()
+	sd.PkgName, sd.FuncName = ParseCaller(Caller)
+
 	TNow := time.Now().UnixNano()
 	data.Lock()
 	data.TSum += TNow - data.tLastEnter
+	sd.Data = data.Data
 	data.Unlock()
-	//log.Println("Exit", p.lastTag, p.ID(), time.Duration(TNow-data.tLastEnter), time.Duration(data.TSum))
+
+	watchChan <- sd
 }
 
-// EachFunc TODO
-type EachFunc func(Caller string, GOID int64, tag string, data Data)
+const watchMaxCount = 10000
 
-// Each TODO
-func (p *Profiler) Each(fn EachFunc) {
-	hash := map[string]Data{}
-	p.RLock()
-	for tag, data := range p.DataHash {
-		data.Lock()
-		hash[tag] = data.Data
-		data.Unlock()
-	}
-	Caller := p.Caller
-	GOID := p.GOID
-	p.RUnlock()
-	for tag, data := range hash {
-		fn(Caller, GOID, tag, data)
-	}
+var watchLock sync.Mutex
+var watchChan = make(chan *SnapshotData, watchMaxCount)
+var watches = make([]*Watcher, 0)
+
+// Watcher TODO
+type Watcher struct {
+	C chan SnapshotData
 }
 
-// ReadFunc TODO
-type ReadFunc func(Caller string, GOID int64, data Data)
-
-// Read TODO
-func (p *Profiler) Read(Tag string, fn ReadFunc) {
-	p.RLock()
-	data := p.DataHash[Tag]
-	Caller := p.Caller
-	GOID := p.GOID
-	p.RUnlock()
-	data.Lock()
-	fn(Caller, GOID, data.Data)
-	data.Unlock()
+// Watch TODO
+func Watch() *Watcher {
+	watcher := &Watcher{
+		C: make(chan SnapshotData, watchMaxCount),
+	}
+	watchLock.Lock()
+	watches = append(watches, watcher)
+	watchLock.Unlock()
+	return watcher
 }
 
-func caller(skip int) string {
-	fpcs := make([]uintptr, 1)
-	n := runtime.Callers(skip, fpcs)
-	if n == 0 {
-		return "nil"
-	}
+func init() {
+	go func() {
+		for {
+			for sd := range watchChan {
+				if len(watches) > 0 {
+					watchLock.Lock()
+					for _, watcher := range watches {
+						if len(watcher.C) >= watchMaxCount-1 {
+							<-watcher.C
+						}
+						watcher.C <- *sd
+					}
+					watchLock.Unlock()
+				}
+			}
+		}
+	}()
+}
 
-	pc := fpcs[0] - 1
-	fun := runtime.FuncForPC(pc)
-	if fun == nil {
-		return "nil"
+// SnapshotData TODO
+type SnapshotData struct {
+	ID       string
+	PkgName  string
+	FuncName string
+	FileName string
+	Line     int
+	ParentID string
+	Tag      string
+	Data     Data
+}
+
+// Snapshot TODO
+func Snapshot() []SnapshotData {
+	list := make([]SnapshotData, 0, 1024)
+	hashLock.Lock()
+	for _, p := range profilerHash {
+		p.RLock()
+		for tag, data := range p.dataHash {
+			sd := SnapshotData{
+				ID:       p.ID(),
+				FileName: p.FileName,
+				Line:     p.Line,
+				ParentID: p.ParentID,
+				Tag:      tag,
+			}
+			data.RLock()
+			sd.Data = data.Data
+			data.RUnlock()
+			sd.PkgName, sd.FuncName = ParseCaller(p.Caller)
+			list = append(list, sd)
+		}
+		p.RUnlock()
 	}
-	return fun.Name()
+	hashLock.Unlock()
+
+	return list
+}
+
+// dataLockable TODO
+type dataLockable struct {
+	sync.RWMutex
+	Data
+}
+
+// Data TODO
+type Data struct {
+	Tag        string
+	CallCount  int64
+	TSum       int64
+	tLastEnter int64
+}
+
+// ParseCaller TODO
+func ParseCaller(funcName string) (string, string) {
+	lastSlash := 0
+	for i := 0; i < len(funcName); i++ {
+		if funcName[i] == '/' {
+			lastSlash = i
+		}
+	}
+	firstDot := lastSlash
+	for i := lastSlash; i < len(funcName); i++ {
+		if funcName[i] == '.' {
+			firstDot = i
+			break
+		}
+	}
+	return funcName[:firstDot], funcName[firstDot+1:]
+}
+
+func caller(skip int) (string, string, int) {
+	pc, fileName, line, ok := runtime.Caller(skip)
+	if !ok {
+		return "nil", "nil", 0
+	}
+	fileName = filepath.ToSlash(fileName)
+	fn := runtime.FuncForPC(pc)
+	if fn == nil {
+		return "nil", "nil", 0
+	}
+	return fn.Name(), fileName, line
 }
