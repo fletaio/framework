@@ -14,12 +14,9 @@ var hashLock sync.Mutex
 var profilerHash = map[string]*Profiler{}
 var stackHash = map[int64][]*Profiler{}
 
-func retainProfiler(ignoreGOID bool) *Profiler {
+func retainProfiler() *Profiler {
 	Caller, FileName, Line := caller(4)
-	var GOID int64
-	if !ignoreGOID {
-		GOID = gls.GoID()
-	}
+	GOID := gls.GoID()
 
 	hashLock.Lock()
 	defer hashLock.Unlock()
@@ -28,11 +25,12 @@ func retainProfiler(ignoreGOID bool) *Profiler {
 	p, has := profilerHash[id]
 	if !has {
 		p = &Profiler{
-			Caller:   Caller,
-			GOID:     GOID,
-			dataHash: map[string]*dataLockable{},
-			FileName: FileName,
-			Line:     Line,
+			Caller:     Caller,
+			GOID:       GOID,
+			dataHash:   map[string]*dataLockable{},
+			ParentHash: map[string]bool{},
+			FileName:   FileName,
+			Line:       Line,
 		}
 		profilerHash[id] = p
 	}
@@ -41,7 +39,7 @@ func retainProfiler(ignoreGOID bool) *Profiler {
 		stack = []*Profiler{}
 	}
 	if len(stack) > 0 {
-		p.ParentID = stack[len(stack)-1].ID()
+		p.ParentHash[stack[len(stack)-1].ID()] = true
 	}
 	stackHash[GOID] = append(stack, p)
 	return p
@@ -58,13 +56,19 @@ func releaseProfiler(p *Profiler) {
 // Profiler TODO
 type Profiler struct {
 	sync.RWMutex
-	Caller   string
-	FileName string
-	Line     int
-	GOID     int64
-	ParentID string
-	dataHash map[string]*dataLockable
-	lastTag  string
+	Caller     string
+	FileName   string
+	Line       int
+	GOID       int64
+	ParentHash map[string]bool
+	dataHash   map[string]*dataLockable
+}
+
+// Instance TODO
+type Instance struct {
+	p          *Profiler
+	tag        string
+	tLastEnter int64
 }
 
 // ID TODO
@@ -73,42 +77,44 @@ func (p *Profiler) ID() string {
 }
 
 // Enter TODO
-func Enter() *Profiler {
-	return EnterWithTag("", false)
+func Enter() *Instance {
+	return EnterTag("")
 }
 
 // EnterTag TODO
-func EnterTag(Tag string) *Profiler {
-	return EnterWithTag(Tag, false)
-}
-
-// EnterWith TODO
-func EnterWith(ignoreGOID bool) *Profiler {
-	return EnterWithTag("", ignoreGOID)
-}
-
-// EnterWithTag TODO
-func EnterWithTag(Tag string, ignoreGOID bool) *Profiler {
-	p := retainProfiler(ignoreGOID)
+func EnterTag(Tag string) *Instance {
+	p := retainProfiler()
 	p.Lock()
-	p.lastTag = Tag
 	data, has := p.dataHash[Tag]
 	if !has {
-		data = &dataLockable{}
+		data = &dataLockable{
+			Data: Data{
+				TMin: -1,
+				TMax: -1,
+			},
+		}
 		p.dataHash[Tag] = data
 	}
 	p.Unlock()
 
 	data.Lock()
 	data.CallCount++
-	data.tLastEnter = time.Now().UnixNano()
 	data.Unlock()
 
-	return p
+	return &Instance{
+		p:          p,
+		tag:        Tag,
+		tLastEnter: time.Now().UnixNano(),
+	}
 }
 
 // Exit TODO
-func (p *Profiler) Exit() {
+func (pi *Instance) Exit() {
+	pi.p.Exit(pi.tag, pi.tLastEnter)
+}
+
+// Exit TODO
+func (p *Profiler) Exit(Tag string, tLastEnter int64) {
 	defer releaseProfiler(p)
 
 	sd := &SnapshotData{}
@@ -117,16 +123,30 @@ func (p *Profiler) Exit() {
 	Caller := p.Caller
 	sd.FileName = p.FileName
 	sd.Line = p.Line
-	sd.ParentID = p.ParentID
-	sd.Tag = p.lastTag
-	data := p.dataHash[p.lastTag]
+	for k := range p.ParentHash {
+		PkgName, FuncName := ParseCaller(k)
+		sd.Parents = append(sd.Parents, &Call{
+			PkgName:  PkgName,
+			FuncName: FuncName,
+		})
+	}
+	sd.Tag = Tag
+	data := p.dataHash[Tag]
 	p.RUnlock()
 	sd.PkgName, sd.FuncName = ParseCaller(Caller)
 
 	TNow := time.Now().UnixNano()
 	data.Lock()
-	data.TSum += TNow - data.tLastEnter
+	TDiff := TNow - tLastEnter
+	if data.TMin < 0 || data.TMin < TDiff {
+		data.TMin = TDiff
+	}
+	if data.TMax < 0 || data.TMax > TDiff {
+		data.TMax = TDiff
+	}
+	data.TSum += TDiff
 	sd.Data = data.Data
+	sd.TDiff = TDiff
 	data.Unlock()
 
 	watchChan <- sd
@@ -180,9 +200,16 @@ type SnapshotData struct {
 	FuncName string
 	FileName string
 	Line     int
-	ParentID string
+	Parents  []*Call
 	Tag      string
 	Data     Data
+	TDiff    int64
+}
+
+// Call TODO
+type Call struct {
+	PkgName  string
+	FuncName string
 }
 
 // Snapshot TODO
@@ -196,8 +223,15 @@ func Snapshot() []SnapshotData {
 				ID:       p.ID(),
 				FileName: p.FileName,
 				Line:     p.Line,
-				ParentID: p.ParentID,
+				Parents:  []*Call{},
 				Tag:      tag,
+			}
+			for k := range p.ParentHash {
+				PkgName, FuncName := ParseCaller(k)
+				sd.Parents = append(sd.Parents, &Call{
+					PkgName:  PkgName,
+					FuncName: FuncName,
+				})
 			}
 			data.RLock()
 			sd.Data = data.Data
@@ -220,10 +254,10 @@ type dataLockable struct {
 
 // Data TODO
 type Data struct {
-	Tag        string
-	CallCount  int64
-	TSum       int64
-	tLastEnter int64
+	CallCount int64
+	TSum      int64
+	TMin      int64
+	TMax      int64
 }
 
 // ParseCaller TODO
