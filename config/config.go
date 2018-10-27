@@ -8,7 +8,7 @@ import (
 	toml "github.com/pelletier/go-toml"
 )
 
-// LoadFile TODO
+// LoadFile parse the config from the file of the path
 func LoadFile(path string, v interface{}) error {
 	file, err := os.Open(path)
 	if err != nil {
@@ -19,12 +19,12 @@ func LoadFile(path string, v interface{}) error {
 	return LoadReader(file, v)
 }
 
-// LoadString TODO
+// LoadString parse the config from the string
 func LoadString(data string, v interface{}) error {
 	return LoadReader(bytes.NewReader([]byte(data)), v)
 }
 
-// LoadReader TODO
+// LoadReader parse the config from the file of the reader
 func LoadReader(r io.Reader, v interface{}) error {
 	dec := toml.NewDecoder(r)
 	if err := dec.Decode(v); err != nil {
