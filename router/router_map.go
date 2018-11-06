@@ -11,31 +11,75 @@ import (
 //ListenerMap is a structure for router waiting to listening.
 type ListenerMap struct {
 	l sync.Mutex
-	m map[RemoteAddr]net.Listener
+	m map[RemoteAddr]ListenerState
+}
+
+//ListenState is type of listener's status
+type ListenState int8
+
+const (
+	nothing   ListenState = 0
+	listening ListenState = 1
+	pause     ListenState = 2
+)
+
+//ListenerState is a structure that stores listener and states.
+type ListenerState struct {
+	l  net.Listener
+	s  ListenState
+	cl map[common.Coordinate]ListenState
 }
 
 // Store sets the value for a key.
-func (n *ListenerMap) Store(key RemoteAddr, value net.Listener) {
+func (n *ListenerMap) Store(key RemoteAddr, chain *common.Coordinate, value net.Listener) {
 	n.l.Lock()
+	defer n.l.Unlock()
 	if 0 == len(n.m) {
-		n.m = map[RemoteAddr]net.Listener{
-			key: value,
+		n.m = map[RemoteAddr]ListenerState{
+			key: ListenerState{l: value, s: listening, cl: map[common.Coordinate]ListenState{*chain: listening}},
 		}
 	} else {
-		n.m[key] = value
+		if l, has := n.m[key]; has {
+			l.cl[*chain] = listening
+		} else {
+			n.m[key] = ListenerState{l: value, s: listening, cl: map[common.Coordinate]ListenState{*chain: listening}}
+		}
 	}
-	n.l.Unlock()
 
 }
 
 // Load returns the value stored in the map for a key, or nil if no
 // value is present.
 // The ok result indicates whether value was found in the map.
-func (n *ListenerMap) Load(key RemoteAddr) (net.Listener, bool) {
+func (n *ListenerMap) Load(key RemoteAddr) (ListenerState, bool) {
 	n.l.Lock()
 	defer n.l.Unlock()
 	v, has := n.m[key]
 	return v, has
+}
+
+// State returns the entire status.
+func (ls *ListenerState) State() ListenState {
+	return ls.s
+}
+
+// UpdateState updates the status of the lower listener and returns the entire status.
+// the "entire status" is calculated as the AND of the lower listener
+func (n *ListenerMap) UpdateState(key RemoteAddr, chain *common.Coordinate, state ListenState) (ListenState, error) {
+	n.l.Lock()
+	defer n.l.Unlock()
+	if v, has := n.m[key]; has {
+		v.cl[*chain] = state
+		for _, state := range v.cl {
+			if state == listening {
+				v.s = listening
+				return listening, nil
+			}
+		}
+		v.s = pause
+		return pause, nil
+	}
+	return nothing, ErrNotFoundListener
 }
 
 // // Delete deletes the value for a key.

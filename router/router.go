@@ -4,34 +4,39 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"git.fleta.io/fleta/common"
 	"git.fleta.io/fleta/framework/log"
+	"git.fleta.io/fleta/mocknet/mocknet"
 )
 
 //RemoteAddr remote address type
 type RemoteAddr string
 
+const mockMode = true
+
 //Router that converts external connections to logical connections.
 type Router interface {
-	AddListen() error
+	AddListen(ChainCoord *common.Coordinate) error
 	Dial(addrStr string, ChainCoord *common.Coordinate) error
 	Accept(ChainCoord *common.Coordinate) (Receiver, error)
 	Port() uint16
 	ConnList() []string
 	ID() string
+	Localhost() string
 }
 
 type router struct {
-	Listeners    ListenerMap
-	pConn        PConnMap
-	ReceiverChan ReceiverChanMap
-	port         uint16
-	TempMockID   string
-	localhost    string
+	ListenersLock sync.Mutex
+	Listeners     ListenerMap
+	pConn         PConnMap
+	ReceiverChan  ReceiverChanMap
+	port          uint16
+	TempMockID    string
+	localhost     string
 }
-
-var i = 0
 
 // NewRouter is the router creator.
 func NewRouter(port uint16, TempMockID string) Router {
@@ -47,6 +52,11 @@ func NewRouter(port uint16, TempMockID string) Router {
 
 func (r *router) ID() string {
 	return r.TempMockID
+}
+
+//Localhost returns the local host itself
+func (r *router) Localhost() string {
+	return r.localhost
 }
 
 //ConnList returns the associated node addresses.
@@ -65,49 +75,75 @@ func (r *router) Port() uint16 {
 }
 
 //AddListen registers a logical connection as a waiting-for-connect condition.
-func (r *router) AddListen() error {
+func (r *router) AddListen(ChainCoord *common.Coordinate) error {
 	listenAddr := ":" + strconv.Itoa(int(r.port))
+	r.ListenersLock.Lock()
 	_, has := r.Listeners.Load(RemoteAddr(listenAddr))
 	if !has {
-		// l, err := mocknet.Listen("tcp", r.TempMockID+listenAddr)
-		l, err := net.Listen("tcp", listenAddr)
-		log.Debug("Listen ", listenAddr, " ", l.Addr().String())
-		if err != nil {
-			return err
+		var l net.Listener
+		if mockMode {
+			l2, err := mocknet.Listen("tcp", r.TempMockID+listenAddr)
+			if err != nil {
+				return err
+			}
+			l = l2
+		} else {
+			l2, err := net.Listen("tcp", listenAddr)
+			if err != nil {
+				return err
+			}
+			l = l2
 		}
-		r.Listeners.Store(RemoteAddr(listenAddr), l)
+		log.Debug("Listen ", listenAddr, " ", l.Addr().String())
+		r.Listeners.Store(RemoteAddr(listenAddr), ChainCoord, l)
 		go r.run(l)
 	}
+	r.ListenersLock.Unlock()
 	return nil
+}
+
+func (r *router) PauseListener(ChainCoord *common.Coordinate) {
+	listenAddr := ":" + strconv.Itoa(int(r.port))
+	r.Listeners.UpdateState(RemoteAddr(listenAddr), ChainCoord, pause)
+}
+
+func (r *router) PlayListener(ChainCoord *common.Coordinate) {
+	listenAddr := ":" + strconv.Itoa(int(r.port))
+	r.Listeners.UpdateState(RemoteAddr(listenAddr), ChainCoord, listening)
 }
 
 func (r *router) run(l net.Listener) {
 	for {
-		conn, err := l.Accept()
-		// log.Debug("Router Run Accept " + conn.LocalAddr().String() + " : " + conn.RemoteAddr().String())
-		if err != nil {
-			log.Error("router run err : ", err)
-			continue
-		}
-		if r.localhost == "" {
-			l := conn.LocalAddr().String()
-			ls := strings.Split(l, ":")
-			if len(ls) == 2 {
-				l = ls[0]
+		listenAddr := ":" + strconv.Itoa(int(r.port))
+		r.ListenersLock.Lock()
+		ls, has := r.Listeners.Load(RemoteAddr(listenAddr))
+		r.ListenersLock.Unlock()
+		if has && ls.State() == listening {
+			conn, err := l.Accept()
+			// log.Debug("Router Run Accept " + conn.LocalAddr().String() + " : " + conn.RemoteAddr().String())
+			if err != nil {
+				log.Error("router run err : ", err)
+				continue
 			}
-			r.localhost = l
-		}
+			if r.localhost == "" {
+				r.SetLocalhost(conn.LocalAddr().String())
+			}
 
-		addr := RemoteAddr(conn.RemoteAddr().String())
-		_, has := r.pConn.load(addr)
-		if has {
-			log.Debug("router conn close ", r.ID(), " ", conn.RemoteAddr().String())
-			conn.Close()
+			addr := RemoteAddr(conn.RemoteAddr().String())
+			_, has := r.pConn.load(addr)
+			if has {
+				log.Debug("router conn close ", r.ID(), " ", conn.RemoteAddr().String())
+				conn.Close()
+			} else {
+				log.Debug("router run ", r.ID(), " ", conn.RemoteAddr().String())
+				pc := newPhysicalConnection(addr, conn, r)
+				r.pConn.store(addr, pc)
+				go pc.run()
+			}
+		} else if has {
+			time.Sleep(time.Second * 1)
 		} else {
-			log.Debug("router run ", r.ID(), " ", conn.RemoteAddr().String())
-			pc := newPhysicalConnection(addr, conn, r)
-			r.pConn.store(addr, pc)
-			go pc.run()
+			break
 		}
 	}
 }
@@ -140,27 +176,34 @@ func (r *router) Dial(addrStr string, ChainCoord *common.Coordinate) error {
 	}
 
 	splitPort := strings.Split(addrStr, ":")
-	if len(splitPort) == 2 {
-		addrStr = splitPort[0] + ":" + strconv.Itoa(int(r.Port()))
+	if len(splitPort) > 1 {
+		lastOne := splitPort[len(splitPort)-1]
+		if _, err := strconv.Atoi(lastOne); err == nil {
+			addrStr = strings.Join(splitPort[:len(splitPort)-1], ":") + ":" + strconv.Itoa(int(r.Port()))
+		}
 	}
 
 	addr := RemoteAddr(addrStr)
 	pConn, has := r.pConn.load(addr)
 	if !has {
-		// conn, err := mocknet.Dial("tcp", addrStr, r.TempMockID+":"+strconv.Itoa(int(r.port)))
-		conn, err := net.Dial("tcp", addrStr)
-		if r.localhost == "" {
-			l := conn.LocalAddr().String()
-			ls := strings.Split(l, ":")
-			if len(ls) == 2 {
-				l = ls[0]
+		var conn net.Conn
+		if mockMode {
+			c, err := mocknet.Dial("tcp", addrStr, r.TempMockID+":"+strconv.Itoa(int(r.port)))
+			if err != nil {
+				return err
 			}
-			r.localhost = l
+			conn = c
+		} else {
+			c, err := net.Dial("tcp", addrStr)
+			if err != nil {
+				return err
+			}
+			conn = c
 		}
-
 		log.Debug("Dial1 ", r.ID(), " ", addrStr)
-		if err != nil {
-			return err
+
+		if r.localhost == "" {
+			r.SetLocalhost(conn.LocalAddr().String())
 		}
 
 		pConn = newPhysicalConnection(addr, conn, r)
@@ -173,6 +216,15 @@ func (r *router) Dial(addrStr string, ChainCoord *common.Coordinate) error {
 	pConn.handshake(ChainCoord)
 
 	return nil
+}
+
+func (r *router) SetLocalhost(l string) {
+	ls := strings.Split(l, ":")
+	if len(ls) > 1 {
+		l = strings.Join(ls[0:len(ls)-1], ":")
+	}
+	r.localhost = l
+
 }
 
 func (r *router) acceptConn(conn Receiver, ChainCoord *common.Coordinate) error {
