@@ -13,13 +13,18 @@ type NodeStore struct {
 	m map[string]peerMessage.ConnectInfo
 }
 
+//NewNodeStore is creator of NodeStore
+func NewNodeStore(TempMockID string) (*NodeStore, error) {
+	n := &NodeStore{}
+	return n, nil
+}
+
 // LoadOrStore returns the existing value for the key if present.
 // Otherwise, it stores and returns the given value.
 // The loaded result is true if the value was loaded, false if stored.
 func (n *NodeStore) LoadOrStore(key string, value peerMessage.ConnectInfo) peerMessage.ConnectInfo {
 	n.l.Lock()
 	defer n.l.Unlock()
-
 	if 0 == len(n.m) {
 		n.m = map[string]peerMessage.ConnectInfo{
 			key: value,
@@ -70,13 +75,13 @@ func (n *NodeStore) Load(key string) (peerMessage.ConnectInfo, bool) {
 	return v, has
 }
 
-// // Delete deletes the value for a key.
-// func (n *NodeMap) Delete(key string) {
-// 	n.l.Lock()
-// 	defer n.l.Unlock()
+// Delete deletes the value for a key.
+func (n *NodeStore) Delete(key string) {
+	n.l.Lock()
+	defer n.l.Unlock()
 
-// 	delete(n.m, key)
-// }
+	delete(n.m, key)
+}
 
 // Range calls f sequentially for each key and value present in the map.
 // If f returns false, range stops the iteration.
@@ -164,6 +169,8 @@ type CandidateMap struct {
 // Store sets the value for a key.
 func (n *CandidateMap) store(key string, value candidateState) {
 	n.l.Lock()
+	defer n.l.Unlock()
+
 	if 0 == len(n.m) {
 		n.m = map[string]candidateState{
 			key: value,
@@ -171,7 +178,6 @@ func (n *CandidateMap) store(key string, value candidateState) {
 	} else {
 		n.m[key] = value
 	}
-	n.l.Unlock()
 }
 
 // Load returns the value stored in the map for a key, or nil if no

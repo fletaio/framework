@@ -12,4 +12,5 @@ var (
 	ErrNotMatchCompressionType   = errors.New("not matched compression type")
 	ErrPacketNotStartedMagicword = errors.New("packet not started magicword")
 	ErrInvalidIntegrity          = errors.New("invalid integrity")
+	ErrNotFoundListener          = errors.New("not found listener")
 )

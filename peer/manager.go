@@ -2,6 +2,7 @@ package peer
 
 import (
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,7 +41,8 @@ type Manager struct {
 	Handler    *message.Handler
 	onReady    func(p *Peer)
 
-	nodes           NodeStore
+	// nodes           NodeStore
+	nodes           *NodeStore
 	nodeRotateIndex int
 	candidates      CandidateMap
 
@@ -56,19 +58,26 @@ type Manager struct {
 type candidateState int
 
 const (
-	dialWait     candidateState = 1
-	pongWait     candidateState = 2
-	peerListWait candidateState = 3
+	csDelete       candidateState = 0
+	csDialWait     candidateState = 1
+	csDialWait2    candidateState = 2
+	csDialWait3    candidateState = 3
+	csPongWait     candidateState = 4
+	csPeerListWait candidateState = 5
 )
 
 //NewManager is the peerManager creator.
 //Apply messages necessary for peer management.
-func NewManager(ChainCoord *common.Coordinate, mh *message.Handler, cfg Config, TempMockID string) *Manager {
+func NewManager(ChainCoord *common.Coordinate, mh *message.Handler, cfg Config, TempMockID string) (*Manager, error) {
+	ns, err := NewNodeStore(TempMockID)
+	if err != nil {
+		return nil, err
+	}
 	pm := &Manager{
 		ChainCoord:   ChainCoord,
 		router:       router.NewRouter(cfg.Port, TempMockID),
 		Handler:      mh,
-		nodes:        NodeStore{},    //make(map[string]peerMessage.ConnectInfo),
+		nodes:        ns,             //make(map[string]peerMessage.ConnectInfo),
 		candidates:   CandidateMap{}, //make(map[string]candidateState),
 		connections:  ConnectMap{},   //make(map[string]*Peer),
 		eventHandler: []EventHandler{},
@@ -82,7 +91,7 @@ func NewManager(ChainCoord *common.Coordinate, mh *message.Handler, cfg Config, 
 	//add requestPeerList message
 	mh.ApplyMessage(peerMessage.PeerListMessageType, peerMessage.PeerListCreator, pm.peerListHandler)
 
-	return pm
+	return pm, nil
 }
 
 //RegisterEventHandler is Registered event handler
@@ -116,7 +125,7 @@ func (pm *Manager) StartManage() {
 	wg.Wait()
 
 	// peer list load from db
-	pm.router.AddListen()
+	pm.router.AddListen(pm.ChainCoord)
 
 	go pm.manageCandidate()
 	go pm.rotatePeer()
@@ -124,7 +133,10 @@ func (pm *Manager) StartManage() {
 
 // AddNode is used to register additional peers from outside.
 func (pm *Manager) AddNode(addr string) error {
-	pm.candidates.store(addr, dialWait)
+	if pm.router.Localhost() != "" && strings.HasPrefix(addr, pm.router.Localhost()) {
+		return nil
+	}
+	pm.candidates.store(addr, csDialWait)
 	if err := pm.router.Dial(addr, pm.ChainCoord); err != nil {
 		log.Error("StartManage connect seednode ", err)
 		return err
@@ -195,7 +207,7 @@ func (pm *Manager) pongHandler(m message.Message) error {
 			p.SetPingTime(pingTime)
 			addr := p.RemoteAddr().String()
 			pm.nodes.LoadOrStore(addr, peerMessage.NewConnectInfo(addr, p.PingTime()))
-			pm.candidates.store(addr, peerListWait)
+			pm.candidates.store(addr, csPeerListWait)
 
 			peerMessage.SendRequestPeerList(p, pong.From)
 		}
@@ -227,7 +239,7 @@ func (pm *Manager) peerListHandler(m message.Message) error {
 			pm.candidates.delete(peerList.From)
 
 			for _, ci := range peerList.List {
-				if ci.Address == pm.router.ID() {
+				if ci.Address == pm.router.Localhost() {
 					continue
 				}
 
@@ -241,12 +253,7 @@ func (pm *Manager) peerListHandler(m message.Message) error {
 					continue
 				}
 
-				pm.candidates.store(ci.Address, dialWait)
-				log.Debug("connect : ", pm.router.ID(), " to ", ci.Address)
-				err := pm.router.Dial(ci.Address, pm.ChainCoord)
-				if err != nil {
-					log.Error("PeerListHandler err ", err)
-				}
+				pm.AddNode(ci.Address)
 				time.Sleep(time.Millisecond * 50)
 			}
 
@@ -256,6 +263,7 @@ func (pm *Manager) peerListHandler(m message.Message) error {
 						pm.updateScoreBoard(p, ci)
 					}
 				}
+				pm.addReadyConn(p)
 			}
 
 			pm.peerGroupLock.Unlock()
@@ -280,69 +288,99 @@ func (pm *Manager) updateScoreBoard(p *Peer, ci peerMessage.ConnectInfo) {
 func (pm *Manager) manageCandidate() {
 	for {
 		time.Sleep(time.Second * 30)
+		// pm.candidates.lock()
+		addList := []string{}
+		modifylist := map[string]candidateState{}
 		pm.candidates.rangeMap(func(addr string, cs candidateState) bool {
-			if cs == pongWait {
+			if strings.HasPrefix(addr, pm.router.Localhost()) {
+				modifylist[addr] = csDelete
+				// pm.candidates.delete(addr)
+				return true
+			}
+			switch cs {
+			case csDialWait:
+				modifylist[addr] = csDialWait2
+				// pm.candidates.store(addr, dialWait2)
+				err := pm.router.Dial(addr, pm.ChainCoord)
+				if err != nil {
+					log.Error("PeerListHandler err ", err)
+				}
+			case csDialWait2:
+				modifylist[addr] = csDialWait3
+				// pm.candidates.store(addr, dialWait3)
+				err := pm.router.Dial(addr, pm.ChainCoord)
+				if err != nil {
+					log.Error("PeerListHandler err ", err)
+				}
+			case csDialWait3:
+				modifylist[addr] = csDelete
+				// pm.candidates.delete(addr)
+				pm.nodes.Delete(addr)
+			case csPongWait:
 				if p, has := pm.connections.Load(addr); has {
 					peerMessage.SendPing(p, uint32(time.Now().UnixNano()), p.LocalAddr().String(), p.RemoteAddr().String())
 				} else {
-					if addr != pm.router.ID() {
-						err := pm.router.Dial(addr, pm.ChainCoord)
-						if err != nil {
-							log.Error("PeerListHandler err ", err)
-						}
-					}
+					addList = append(addList, addr)
 				}
-			} else if cs == dialWait {
-				if addr != pm.router.ID() {
-					err := pm.router.Dial(addr, pm.ChainCoord)
-					if err != nil {
-						log.Error("PeerListHandler err ", err)
-					}
-				}
-			} else if cs == peerListWait {
+			case csPeerListWait:
 				if p, has := pm.connections.Load(addr); has {
-					peerMessage.SendRequestPeerList(p, pm.router.ID())
+					peerMessage.SendRequestPeerList(p, pm.router.Localhost()+":"+strconv.Itoa(int(pm.router.Port())))
 				} else {
-					if addr != pm.router.ID() {
-						err := pm.router.Dial(addr, pm.ChainCoord)
-						if err != nil {
-							log.Error("PeerListHandler err ", err)
-						}
-					}
+					addList = append(addList, addr)
 				}
 			}
 			time.Sleep(time.Millisecond * 50)
 			return true
 		})
+		// pm.candidates.unlock()
+		for k, s := range modifylist {
+			switch s {
+			case csDelete:
+				pm.candidates.delete(k)
+			default:
+				pm.candidates.store(k, s)
+			}
+		}
+		for _, addr := range addList {
+			pm.AddNode(addr)
+		}
+
 	}
 }
 
 func (pm *Manager) rotatePeer() {
 	for {
-		time.Sleep(time.Minute * 20)
-		// time.Sleep(time.Second * 2)
-
-		for i := pm.nodeRotateIndex; i < pm.nodes.Len(); i++ {
-			p := pm.nodes.Get(i)
-			pm.nodeRotateIndex = i + 1
-			if pm.peerStorage.Have(p.Address) {
-				continue
-			}
-			log.Debug("rotate peer ", pm.router.ID(), " to ", p.Address)
-			if connectedPeer, has := pm.connections.Load(p.Address); has {
-				pm.addReadyConn(connectedPeer)
-			} else {
-				err := pm.router.Dial(p.Address, pm.ChainCoord)
-				if err != nil {
-					log.Error("PeerListHandler err ", err)
-				}
-			}
-
-			break
+		if pm.peerStorage.NotEnoughPeer() {
+			time.Sleep(time.Second * 2)
+		} else {
+			time.Sleep(time.Minute * 20)
 		}
-		if pm.nodeRotateIndex >= pm.nodes.Len()-1 {
-			pm.nodeRotateIndex = 0
+
+		pm.appendPeerStorage()
+	}
+}
+
+func (pm *Manager) appendPeerStorage() {
+	for i := pm.nodeRotateIndex; i < pm.nodes.Len(); i++ {
+		p := pm.nodes.Get(i)
+		pm.nodeRotateIndex = i + 1
+		if pm.peerStorage.Have(p.Address) {
+			continue
 		}
+		log.Debug("rotate peer ", pm.router.ID(), " to ", p.Address)
+		if connectedPeer, has := pm.connections.Load(p.Address); has {
+			pm.addReadyConn(connectedPeer)
+		} else {
+			err := pm.router.Dial(p.Address, pm.ChainCoord)
+			if err != nil {
+				log.Error("PeerListHandler err ", err)
+			}
+		}
+
+		break
+	}
+	if pm.nodeRotateIndex >= pm.nodes.Len()-1 {
+		pm.nodeRotateIndex = 0
 	}
 }
 
@@ -372,6 +410,9 @@ func (pm *Manager) deletePeer(addr string) {
 	}
 	pm.eventHandlerLock.Unlock()
 	pm.connections.Delete(addr)
+	// if pm.peerStorage.NotEnoughPeer() {
+	// 	pm.appendPeerStorage()
+	// }
 }
 
 func (pm *Manager) addPeer(p *Peer) {
@@ -384,7 +425,7 @@ func (pm *Manager) addPeer(p *Peer) {
 	} else {
 		addr := p.RemoteAddr().String()
 		pm.connections.Store(addr, p)
-		pm.candidates.store(addr, pongWait)
+		pm.candidates.store(addr, csPongWait)
 
 		pm.eventHandlerLock.Lock()
 		for _, eh := range pm.eventHandler {

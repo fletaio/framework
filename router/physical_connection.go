@@ -90,6 +90,7 @@ func (pc *physicalConnection) run() error {
 		if len(body) == 1 && ChainCoord != nil { // handshake
 			log.Debug("response handshake ", body[0], " ", pc.LocalAddr().String(), " ", pc.RemoteAddr().String())
 			if body[0] == FORONE {
+
 				pc.handshakeResponse(ChainCoord)
 				if conn, new := pc.makeLogicalConnenction(ChainCoord); new == true {
 					err := pc.r.acceptConn(conn, ChainCoord)

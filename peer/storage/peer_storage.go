@@ -17,7 +17,7 @@ var (
 
 //peer const list
 const (
-	groupLength int = 9
+	groupLength int = 2
 
 	distance1 time.Duration = time.Millisecond * 50
 	distance2 time.Duration = time.Millisecond * 250
@@ -64,6 +64,7 @@ type IPeerStorage interface {
 	Add(peer IPeer, scoreFunc Score) bool
 	List() []string
 	Have(addr string) bool
+	NotEnoughPeer() bool
 }
 
 //IPeer is a functional list of Peer structures to be used internally.
@@ -71,6 +72,7 @@ type IPeer interface {
 	RemoteAddr() net.Addr
 	LocalAddr() net.Addr
 	PingTime() time.Duration
+	IsClose() bool
 }
 
 // Score is the type of function that scores.
@@ -147,6 +149,24 @@ func (ps *peerStorage) Add(p IPeer, score Score) (inserted bool) {
 	}
 
 	return ps.insertSort(pi)
+}
+
+//List returns the peers that are included in the group in order.
+func (ps *peerStorage) NotEnoughPeer() bool {
+	if ps.peerGroup[group1][groupLength-1] == nil {
+		return true
+	} else if ps.peerGroup[group2][groupLength-1] == nil {
+		return true
+	} else if ps.peerGroup[group3][groupLength-1] == nil {
+		return true
+	} else if ps.peerGroup[group1][groupLength-1].p == nil || ps.peerGroup[group1][groupLength-1].p.IsClose() {
+		return true
+	} else if ps.peerGroup[group2][groupLength-1].p == nil || ps.peerGroup[group2][groupLength-1].p.IsClose() {
+		return true
+	} else if ps.peerGroup[group3][groupLength-1].p == nil || ps.peerGroup[group3][groupLength-1].p.IsClose() {
+		return true
+	}
+	return false
 }
 
 //List returns the peers that are included in the group in order.

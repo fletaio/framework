@@ -104,6 +104,11 @@ func (p *Peer) SetRegisteredTime(t int64) {
 	p.registeredTime = t
 }
 
+//IsClose returns closed
+func (p *Peer) IsClose() bool {
+	return p.closed
+}
+
 //Close is used to break logical connections and delete stored peer data.
 func (p *Peer) Close() {
 	p.closed = true
