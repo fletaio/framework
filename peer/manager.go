@@ -9,7 +9,7 @@ import (
 	"git.fleta.io/fleta/common"
 	"git.fleta.io/fleta/framework/log"
 	"git.fleta.io/fleta/framework/message"
-	peerMessage "git.fleta.io/fleta/framework/peer/message"
+	"git.fleta.io/fleta/framework/peer/peermessage"
 	"git.fleta.io/fleta/framework/peer/storage"
 	"git.fleta.io/fleta/framework/router"
 )
@@ -77,7 +77,7 @@ func NewManager(ChainCoord *common.Coordinate, mh *message.Handler, cfg Config, 
 		ChainCoord:   ChainCoord,
 		router:       router.NewRouter(cfg.Port, TempMockID),
 		Handler:      mh,
-		nodes:        ns,             //make(map[string]peerMessage.ConnectInfo),
+		nodes:        ns,             //make(map[string]peermessage.ConnectInfo),
 		candidates:   CandidateMap{}, //make(map[string]candidateState),
 		connections:  ConnectMap{},   //make(map[string]*Peer),
 		eventHandler: []EventHandler{},
@@ -85,11 +85,11 @@ func NewManager(ChainCoord *common.Coordinate, mh *message.Handler, cfg Config, 
 	pm.peerStorage = storage.NewPeerStorage(pm.kickOutPeerStorage)
 
 	//add ping message
-	mh.ApplyMessage(peerMessage.PingMessageType, peerMessage.PingCreator, pm.pingHandler)
+	mh.ApplyMessage(peermessage.PingMessageType, peermessage.PingCreator, pm.pingHandler)
 	//add pong message
-	mh.ApplyMessage(peerMessage.PongMessageType, peerMessage.PongCreator, pm.pongHandler)
+	mh.ApplyMessage(peermessage.PongMessageType, peermessage.PongCreator, pm.pongHandler)
 	//add requestPeerList message
-	mh.ApplyMessage(peerMessage.PeerListMessageType, peerMessage.PeerListCreator, pm.peerListHandler)
+	mh.ApplyMessage(peermessage.PeerListMessageType, peermessage.PeerListCreator, pm.peerListHandler)
 
 	return pm, nil
 }
@@ -165,7 +165,7 @@ func (pm *Manager) ConnectedPeerList() []string {
 //NodeList is returns the addresses of the collected peers
 func (pm *Manager) NodeList() []string {
 	list := make([]string, 0)
-	pm.nodes.Range(func(addr string, ci peerMessage.ConnectInfo) bool {
+	pm.nodes.Range(func(addr string, ci peermessage.ConnectInfo) bool {
 		list = append(list, addr+":"+strconv.Itoa(ci.ScoreBoard.Len()))
 		return true
 	})
@@ -188,28 +188,28 @@ func (pm *Manager) GroupList() []string {
 }
 
 func (pm *Manager) pingHandler(m message.Message) error {
-	if ping, ok := m.(*peerMessage.Ping); ok {
+	if ping, ok := m.(*peermessage.Ping); ok {
 		log.Debug("PingHandler ", pm.router.Port(), " ", ping.From, " ", ping.To)
 
 		if p, has := pm.connections.Load(ping.From); has {
-			peerMessage.SendPong(p, ping)
+			peermessage.SendPong(p, ping)
 		}
 	}
 	return nil
 }
 
 func (pm *Manager) pongHandler(m message.Message) error {
-	if pong, ok := m.(*peerMessage.Pong); ok {
+	if pong, ok := m.(*peermessage.Pong); ok {
 		log.Debug("PongHandler start ", pm.router.ID(), " ", pong.From, " ", pong.To)
 		pingTime := time.Duration(int64(uint32(time.Now().UnixNano()) - pong.Time))
 
 		if p, has := pm.connections.Load(pong.To); has {
 			p.SetPingTime(pingTime)
 			addr := p.RemoteAddr().String()
-			pm.nodes.LoadOrStore(addr, peerMessage.NewConnectInfo(addr, p.PingTime()))
+			pm.nodes.LoadOrStore(addr, peermessage.NewConnectInfo(addr, p.PingTime()))
 			pm.candidates.store(addr, csPeerListWait)
 
-			peerMessage.SendRequestPeerList(p, pong.From)
+			peermessage.SendRequestPeerList(p, pong.From)
 		}
 		log.Debug("PongHandler end ", pm.router.ID(), " ", pong.From, " ", pong.To)
 	}
@@ -217,12 +217,12 @@ func (pm *Manager) pongHandler(m message.Message) error {
 }
 
 func (pm *Manager) peerListHandler(m message.Message) error {
-	if peerList, ok := m.(*peerMessage.PeerList); ok {
+	if peerList, ok := m.(*peermessage.PeerList); ok {
 		if peerList.Request == true {
 			log.Debug("peerListHandler ", pm.router.ID(), " ", peerList.From)
 			peerList.Request = false
-			nodeMap := make(map[string]peerMessage.ConnectInfo)
-			pm.nodes.Range(func(addr string, ci peerMessage.ConnectInfo) bool {
+			nodeMap := make(map[string]peermessage.ConnectInfo)
+			pm.nodes.Range(func(addr string, ci peermessage.ConnectInfo) bool {
 				nodeMap[addr] = ci
 				return true
 			})
@@ -274,12 +274,12 @@ func (pm *Manager) peerListHandler(m message.Message) error {
 	return nil
 }
 
-func (pm *Manager) updateScoreBoard(p *Peer, ci peerMessage.ConnectInfo) {
+func (pm *Manager) updateScoreBoard(p *Peer, ci peermessage.ConnectInfo) {
 	addr := p.RemoteAddr().String()
 
 	node, has := pm.nodes.Load(addr)
 	if !has {
-		node = peerMessage.NewConnectInfo(addr, p.PingTime())
+		node = peermessage.NewConnectInfo(addr, p.PingTime())
 		pm.nodes.Store(addr, node)
 	}
 	node.ScoreBoard.Store(ci.Address, ci.PingTime, p.LocalAddr().String()+" "+p.RemoteAddr().String()+" ")
@@ -318,13 +318,13 @@ func (pm *Manager) manageCandidate() {
 				pm.nodes.Delete(addr)
 			case csPongWait:
 				if p, has := pm.connections.Load(addr); has {
-					peerMessage.SendPing(p, uint32(time.Now().UnixNano()), p.LocalAddr().String(), p.RemoteAddr().String())
+					peermessage.SendPing(p, uint32(time.Now().UnixNano()), p.LocalAddr().String(), p.RemoteAddr().String())
 				} else {
 					addList = append(addList, addr)
 				}
 			case csPeerListWait:
 				if p, has := pm.connections.Load(addr); has {
-					peerMessage.SendRequestPeerList(p, pm.router.Localhost()+":"+strconv.Itoa(int(pm.router.Port())))
+					peermessage.SendRequestPeerList(p, pm.router.Localhost()+":"+strconv.Itoa(int(pm.router.Port())))
 				} else {
 					addList = append(addList, addr)
 				}
@@ -435,7 +435,7 @@ func (pm *Manager) addPeer(p *Peer) {
 
 		go func(p *Peer) {
 			for p.PingTime() == -1 && p.closed == false {
-				peerMessage.SendPing(p, uint32(time.Now().UnixNano()), p.LocalAddr().String(), p.RemoteAddr().String())
+				peermessage.SendPing(p, uint32(time.Now().UnixNano()), p.LocalAddr().String(), p.RemoteAddr().String())
 				time.Sleep(time.Second * 3)
 			}
 		}(p)

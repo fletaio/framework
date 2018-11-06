@@ -1,4 +1,4 @@
-package message
+package peermessage
 
 import (
 	"io"
@@ -29,6 +29,68 @@ func NewConnectInfo(addr string, t time.Duration) ConnectInfo {
 		PingTime:   t,
 		ScoreBoard: &ScoreBoardMap{},
 	}
+}
+
+//WriteTo is a serialization function
+func (ci *ConnectInfo) WriteTo(w io.Writer) (int64, error) {
+	var wrote int64
+	{
+		n, err := util.WriteUint64(w, uint64(ci.PingTime))
+		if err != nil {
+			return wrote, err
+		}
+		wrote += n
+	}
+	{
+		bs := []byte(ci.Address)
+
+		bsLen := uint8(len(bs))
+		n, err := util.WriteUint8(w, bsLen)
+		if err != nil {
+			return wrote, err
+		}
+		wrote += n
+
+		nint, err := w.Write(bs)
+		if err != nil {
+			return wrote, err
+		}
+		wrote += int64(nint)
+	}
+	return wrote, nil
+}
+
+// ReadFrom is a deserialization function
+func (ci *ConnectInfo) ReadFrom(r io.Reader) (int64, error) {
+	var read int64
+	{
+		v, n, err := util.ReadUint64(r)
+		if err != nil {
+			return read, err
+		}
+		read += n
+
+		ci.PingTime = time.Duration(v)
+	}
+
+	{
+		v, n, err := util.ReadUint8(r)
+		if err != nil {
+			return read, err
+		}
+		read += n
+		bsLen := v
+		bsBs := make([]byte, bsLen)
+
+		nInt, err := r.Read(bsBs)
+		if err != nil {
+			return read, err
+		}
+		read += int64(nInt)
+
+		ci.Address = string(bsBs)
+	}
+	return read, nil
 }
 
 //Score TODO
@@ -115,46 +177,8 @@ func (p *PeerList) WriteTo(w io.Writer) (int64, error) {
 		}
 		wrote += n
 
-		for key, info := range p.List {
-			{
-				bs := []byte(key)
-
-				bsLen := uint8(len(bs))
-				n, err := util.WriteUint8(w, bsLen)
-				if err != nil {
-					return wrote, err
-				}
-				wrote += n
-
-				nint, err := w.Write(bs)
-				if err != nil {
-					return wrote, err
-				}
-				wrote += int64(nint)
-			}
-			{
-				n, err := util.WriteUint64(w, uint64(info.PingTime))
-				if err != nil {
-					return wrote, err
-				}
-				wrote += n
-			}
-			{
-				bs := []byte(info.Address)
-
-				bsLen := uint8(len(bs))
-				n, err := util.WriteUint8(w, bsLen)
-				if err != nil {
-					return wrote, err
-				}
-				wrote += n
-
-				nint, err := w.Write(bs)
-				if err != nil {
-					return wrote, err
-				}
-				wrote += int64(nint)
-			}
+		for _, info := range p.List {
+			info.WriteTo(w)
 		}
 	}
 
@@ -164,7 +188,6 @@ func (p *PeerList) WriteTo(w io.Writer) (int64, error) {
 // ReadFrom is a deserialization function
 func (p *PeerList) ReadFrom(r io.Reader) (int64, error) {
 	var read int64
-
 	{
 		v, n, err := util.ReadUint8(r)
 		if err != nil {
@@ -206,54 +229,9 @@ func (p *PeerList) ReadFrom(r io.Reader) (int64, error) {
 		list := make(map[string]ConnectInfo)
 
 		for i := uint32(0); i < listLen; i++ {
-			var key string
 			var info ConnectInfo
-			{
-				v, n, err := util.ReadUint8(r)
-				if err != nil {
-					return read, err
-				}
-				read += n
-				bsLen := v
-				bsBs := make([]byte, bsLen)
-
-				nInt, err := r.Read(bsBs)
-				if err != nil {
-					return read, err
-				}
-				read += int64(nInt)
-
-				key = string(bsBs)
-			}
-
-			{
-				v, n, err := util.ReadUint64(r)
-				if err != nil {
-					return read, err
-				}
-				read += n
-
-				info.PingTime = time.Duration(v)
-			}
-
-			{
-				v, n, err := util.ReadUint8(r)
-				if err != nil {
-					return read, err
-				}
-				read += n
-				bsLen := v
-				bsBs := make([]byte, bsLen)
-
-				nInt, err := r.Read(bsBs)
-				if err != nil {
-					return read, err
-				}
-				read += int64(nInt)
-
-				info.Address = string(bsBs)
-			}
-			list[key] = info
+			info.ReadFrom(r)
+			list[info.Address] = info
 		}
 
 		p.List = list
