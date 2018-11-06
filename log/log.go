@@ -20,8 +20,8 @@ func init() {
 
 	//TODO contact config system and load file config
 	WithDefaultFields(plog.Fields{
-		{"program", "FLETA"},
-		{"version", "0.0.1"},
+		plog.Field{Key: "program", Value: "FLETA"},
+		plog.Field{Key: "version", Value: "0.0.1"},
 	}...)
 
 	stdlog.Println("init")
