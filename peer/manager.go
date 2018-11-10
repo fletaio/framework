@@ -428,10 +428,15 @@ func (pm *Manager) addPeer(p *Peer) {
 		pm.candidates.store(addr, csPongWait)
 
 		pm.eventHandlerLock.Lock()
+		list := []EventHandler{}
 		for _, eh := range pm.eventHandler {
-			eh.PeerConnected(p)
+			list = append(list, eh)
 		}
 		pm.eventHandlerLock.Unlock()
+
+		for _, eh := range list {
+			eh.PeerConnected(p)
+		}
 
 		go func(p *Peer) {
 			for p.PingTime() == -1 && p.closed == false {

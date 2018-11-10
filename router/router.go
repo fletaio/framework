@@ -78,6 +78,8 @@ func (r *router) Port() uint16 {
 func (r *router) AddListen(ChainCoord *common.Coordinate) error {
 	listenAddr := ":" + strconv.Itoa(int(r.port))
 	r.ListenersLock.Lock()
+	defer r.ListenersLock.Unlock()
+
 	_, has := r.Listeners.Load(RemoteAddr(listenAddr))
 	if !has {
 		var l net.Listener
@@ -98,7 +100,6 @@ func (r *router) AddListen(ChainCoord *common.Coordinate) error {
 		r.Listeners.Store(RemoteAddr(listenAddr), ChainCoord, l)
 		go r.run(l)
 	}
-	r.ListenersLock.Unlock()
 	return nil
 }
 
