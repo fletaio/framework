@@ -102,7 +102,7 @@ func (mh *Handler) ApplyMessage(mt Type, c creator, h handler) error {
 	defer mh.messagesLock.Unlock()
 	_, has := mh.messages[mt]
 	if has {
-		return ErrAlReadyAppliedMessage
+		return ErrAlreadyAppliedMessage
 	}
 
 	mh.messages[mt] = messageTaker{
