@@ -1,6 +1,7 @@
 package peer
 
 import (
+	"net"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,7 +17,8 @@ import (
 
 //Config is structure storing settings information
 type Config struct {
-	Port uint16
+	Port   uint16
+	Dbpath string
 }
 
 //EventHandler is callback when peer connected or closed
@@ -68,14 +70,14 @@ const (
 
 //NewManager is the peerManager creator.
 //Apply messages necessary for peer management.
-func NewManager(ChainCoord *common.Coordinate, mh *message.Handler, cfg Config, TempMockID string) (*Manager, error) {
-	ns, err := NewNodeStore(TempMockID)
+func NewManager(ChainCoord *common.Coordinate, mh *message.Handler, cfg Config, network, dbpath string) (*Manager, error) {
+	ns, err := NewNodeStore(dbpath)
 	if err != nil {
 		return nil, err
 	}
 	pm := &Manager{
 		ChainCoord:   ChainCoord,
-		router:       router.NewRouter(cfg.Port, TempMockID),
+		router:       router.NewRouter(network, cfg.Port),
 		Handler:      mh,
 		nodes:        ns,             //make(map[string]peermessage.ConnectInfo),
 		candidates:   CandidateMap{}, //make(map[string]candidateState),
@@ -115,8 +117,8 @@ func (pm *Manager) StartManage() {
 			if err != nil {
 				continue
 			}
-			log.Debug("Accept ", conn.LocalAddr().String(), " ", conn.RemoteAddr().String())
-			go func(conn router.Receiver) {
+			// log.Debug("Accept ", conn.LocalAddr().String(), " ", conn.RemoteAddr().String())
+			go func(conn net.Conn) {
 				peer := NewPeer(conn, pm.Handler, pm.deletePeer)
 				pm.addPeer(peer)
 			}(conn)
@@ -200,7 +202,7 @@ func (pm *Manager) pingHandler(m message.Message) error {
 
 func (pm *Manager) pongHandler(m message.Message) error {
 	if pong, ok := m.(*peermessage.Pong); ok {
-		log.Debug("PongHandler start ", pm.router.ID(), " ", pong.From, " ", pong.To)
+		log.Debug("PongHandler start ", pm.router.Localhost(), " ", pong.From, " ", pong.To)
 		pingTime := time.Duration(int64(uint32(time.Now().UnixNano()) - pong.Time))
 
 		if p, has := pm.connections.Load(pong.To); has {
@@ -211,7 +213,7 @@ func (pm *Manager) pongHandler(m message.Message) error {
 
 			peermessage.SendRequestPeerList(p, pong.From)
 		}
-		log.Debug("PongHandler end ", pm.router.ID(), " ", pong.From, " ", pong.To)
+		log.Debug("PongHandler end ", pm.router.Localhost(), " ", pong.From, " ", pong.To)
 	}
 	return nil
 }
@@ -219,7 +221,7 @@ func (pm *Manager) pongHandler(m message.Message) error {
 func (pm *Manager) peerListHandler(m message.Message) error {
 	if peerList, ok := m.(*peermessage.PeerList); ok {
 		if peerList.Request == true {
-			log.Debug("peerListHandler ", pm.router.ID(), " ", peerList.From)
+			log.Debug("peerListHandler ", pm.router.Localhost(), " ", peerList.From)
 			peerList.Request = false
 			nodeMap := make(map[string]peermessage.ConnectInfo)
 			pm.nodes.Range(func(addr string, ci peermessage.ConnectInfo) bool {
@@ -234,7 +236,7 @@ func (pm *Manager) peerListHandler(m message.Message) error {
 			}
 
 		} else {
-			log.Debug("peerListHandler ", pm.router.ID(), " ", peerList.From, " ", len(peerList.List)) //, " ", peerList.List)
+			log.Debug("peerListHandler ", pm.router.Localhost(), " ", peerList.From, " ", len(peerList.List)) //, " ", peerList.List)
 			pm.peerGroupLock.Lock()
 			pm.candidates.delete(peerList.From)
 
@@ -269,7 +271,7 @@ func (pm *Manager) peerListHandler(m message.Message) error {
 			pm.peerGroupLock.Unlock()
 		}
 
-		log.Debug("peerListHandler end ", pm.router.ID(), " ", peerList.From)
+		log.Debug("peerListHandler end ", pm.router.Localhost(), " ", peerList.From)
 	}
 	return nil
 }
@@ -367,7 +369,7 @@ func (pm *Manager) appendPeerStorage() {
 		if pm.peerStorage.Have(p.Address) {
 			continue
 		}
-		log.Debug("rotate peer ", pm.router.ID(), " to ", p.Address)
+		log.Debug("rotate peer ", pm.router.Localhost(), " to ", p.Address)
 		if connectedPeer, has := pm.connections.Load(p.Address); has {
 			pm.addReadyConn(connectedPeer)
 		} else {
@@ -428,15 +430,10 @@ func (pm *Manager) addPeer(p *Peer) {
 		pm.candidates.store(addr, csPongWait)
 
 		pm.eventHandlerLock.Lock()
-		list := []EventHandler{}
 		for _, eh := range pm.eventHandler {
-			list = append(list, eh)
-		}
-		pm.eventHandlerLock.Unlock()
-
-		for _, eh := range list {
 			eh.PeerConnected(p)
 		}
+		pm.eventHandlerLock.Unlock()
 
 		go func(p *Peer) {
 			for p.PingTime() == -1 && p.closed == false {

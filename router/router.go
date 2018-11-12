@@ -9,7 +9,8 @@ import (
 
 	"git.fleta.io/fleta/common"
 	"git.fleta.io/fleta/framework/log"
-	"git.fleta.io/fleta/mocknet/mocknet"
+
+	network "git.fleta.io/fleta/mocknet"
 )
 
 //RemoteAddr remote address type
@@ -21,10 +22,9 @@ const mockMode = true
 type Router interface {
 	AddListen(ChainCoord *common.Coordinate) error
 	Dial(addrStr string, ChainCoord *common.Coordinate) error
-	Accept(ChainCoord *common.Coordinate) (Receiver, error)
+	Accept(ChainCoord *common.Coordinate) (net.Conn, error)
 	Port() uint16
 	ConnList() []string
-	ID() string
 	Localhost() string
 }
 
@@ -34,24 +34,20 @@ type router struct {
 	pConn         PConnMap
 	ReceiverChan  ReceiverChanMap
 	port          uint16
-	TempMockID    string
+	network       string
 	localhost     string
 }
 
 // NewRouter is the router creator.
-func NewRouter(port uint16, TempMockID string) Router {
+func NewRouter(Network string, port uint16) Router {
 	r := &router{
 		Listeners:    ListenerMap{},
 		pConn:        PConnMap{},
 		ReceiverChan: ReceiverChanMap{},
 		port:         port,
-		TempMockID:   TempMockID,
+		network:      Network,
 	}
 	return r
-}
-
-func (r *router) ID() string {
-	return r.TempMockID
 }
 
 //Localhost returns the local host itself
@@ -78,28 +74,25 @@ func (r *router) Port() uint16 {
 func (r *router) AddListen(ChainCoord *common.Coordinate) error {
 	listenAddr := ":" + strconv.Itoa(int(r.port))
 	r.ListenersLock.Lock()
-	defer r.ListenersLock.Unlock()
-
 	_, has := r.Listeners.Load(RemoteAddr(listenAddr))
 	if !has {
-		var l net.Listener
-		if mockMode {
-			l2, err := mocknet.Listen("tcp", r.TempMockID+listenAddr)
-			if err != nil {
-				return err
-			}
-			l = l2
-		} else {
-			l2, err := net.Listen("tcp", listenAddr)
-			if err != nil {
-				return err
-			}
-			l = l2
+		l2, err := network.Listen(r.network, listenAddr)
+		if err != nil {
+			return err
 		}
-		log.Debug("Listen ", listenAddr, " ", l.Addr().String())
-		r.Listeners.Store(RemoteAddr(listenAddr), ChainCoord, l)
-		go r.run(l)
+		log.Debug("Listen ", listenAddr, " ", l2.Addr().String())
+		r.Listeners.Store(RemoteAddr(listenAddr), ChainCoord, l2)
+		go r.run(l2)
+
+		// l, _ = r.Listeners.Load(RemoteAddr(listenAddr))
+		// localhost := l.l.Addr().String()
+		// if r.localhost == "" {
+		// 	if !strings.HasPrefix(localhost, ":") {
+		// 		r.localhost = localhost
+		// 	}
+		// }
 	}
+	r.ListenersLock.Unlock()
 	return nil
 }
 
@@ -133,11 +126,11 @@ func (r *router) run(l net.Listener) {
 			addr := RemoteAddr(conn.RemoteAddr().String())
 			_, has := r.pConn.load(addr)
 			if has {
-				log.Debug("router conn close ", r.ID(), " ", conn.RemoteAddr().String())
+				log.Debug("router conn close ", r.localhost, " ", conn.RemoteAddr().String())
 				conn.Close()
 			} else {
-				log.Debug("router run ", r.ID(), " ", conn.RemoteAddr().String())
-				pc := newPhysicalConnection(addr, conn, r)
+				log.Debug("router run ", r.localhost, " ", conn.RemoteAddr().String())
+				pc := newPhysicalConnection(addr, r.Localhost(), conn, r)
 				r.pConn.store(addr, pc)
 				go pc.run()
 			}
@@ -150,19 +143,7 @@ func (r *router) run(l net.Listener) {
 }
 
 //Accept returns a logical connection when an external connection request is received.
-func (r *router) Accept(ChainCoord *common.Coordinate) (Receiver, error) {
-	// listenAddr := ":" + strconv.Itoa(int(r.Port()))
-	// l, has := r.Listeners.Load(RemoteAddr(listenAddr))
-	// if !has {
-	//  return nil, ErrListenFirst
-	// }
-	// lAddr := strings.Split(l.Addr().String(), ":")
-	// portStr := lAddr[len(lAddr)-1]
-	// port, err := strconv.Atoi(portStr)
-	// if err != nil {
-	//  return nil, err
-	// }
-
+func (r *router) Accept(ChainCoord *common.Coordinate) (net.Conn, error) {
 	ch := r.ReceiverChan.load(int(r.Port()), *ChainCoord)
 
 	receiver := <-ch
@@ -187,31 +168,21 @@ func (r *router) Dial(addrStr string, ChainCoord *common.Coordinate) error {
 	addr := RemoteAddr(addrStr)
 	pConn, has := r.pConn.load(addr)
 	if !has {
-		var conn net.Conn
-		if mockMode {
-			c, err := mocknet.Dial("tcp", addrStr, r.TempMockID+":"+strconv.Itoa(int(r.port)))
-			if err != nil {
-				return err
-			}
-			conn = c
-		} else {
-			c, err := net.Dial("tcp", addrStr)
-			if err != nil {
-				return err
-			}
-			conn = c
+		conn, err := network.Dial(r.network, addrStr)
+		if err != nil {
+			return err
 		}
-		log.Debug("Dial1 ", r.ID(), " ", addrStr)
+		log.Debug("Dial1 ", r.localhost, " ", addrStr)
 
 		if r.localhost == "" {
 			r.SetLocalhost(conn.LocalAddr().String())
 		}
 
-		pConn = newPhysicalConnection(addr, conn, r)
+		pConn = newPhysicalConnection(addr, r.localhost, conn, r)
 		r.pConn.store(addr, pConn)
 		go pConn.run()
 	} else {
-		log.Debug("Dial2 ", r.ID(), " ", addrStr)
+		log.Debug("Dial2 ", r.localhost, " ", addrStr)
 	}
 
 	pConn.handshake(ChainCoord)
@@ -228,15 +199,7 @@ func (r *router) SetLocalhost(l string) {
 
 }
 
-func (r *router) acceptConn(conn Receiver, ChainCoord *common.Coordinate) error {
-	// listenAddrs := strings.Split(conn.LocalAddr().String(), ":")
-	// listenPort := listenAddrs[len(listenAddrs)-1]
-	// port, err := strconv.Atoi(listenPort)
-	// if err != nil {
-	//  log.Debug("acceptConn start err ", conn.LocalAddr().String(), " ", ChainCoord, " ", err)
-	//  return err
-	// }
-
+func (r *router) acceptConn(conn net.Conn, ChainCoord *common.Coordinate) error {
 	ch := r.ReceiverChan.load(int(r.Port()), *ChainCoord)
 	ch <- conn
 

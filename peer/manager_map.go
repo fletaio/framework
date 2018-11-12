@@ -20,8 +20,8 @@ type NodeStore struct {
 }
 
 //NewNodeStore is creator of NodeStore
-func NewNodeStore(TempMockID string) (*NodeStore, error) {
-	db, err := openNodesDB("./_data/" + TempMockID + "/nodes")
+func NewNodeStore(dbpath string) (*NodeStore, error) {
+	db, err := openNodesDB(dbpath)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +57,7 @@ func openNodesDB(dbPath string) (*badger.DB, error) {
 	opts.ValueDir = dbPath
 	opts.Truncate = true
 	opts.SyncWrites = true
-	opts.ValueLogFileSize = 1 << 26
+	opts.ValueLogFileSize = 1 << 24
 	lockfilePath := filepath.Join(opts.Dir, "LOCK")
 	os.MkdirAll(dbPath, os.ModeDir)
 
@@ -216,14 +216,14 @@ func (n *NodeStore) Len() int {
 
 //ConnectMap is the structure of peer list
 type ConnectMap struct {
-	l sync.Mutex
+	l sync.RWMutex
 	m map[string]*Peer
 }
 
 // Len returns to ConnectMap length
 func (n *ConnectMap) Len() int {
-	n.l.Lock()
-	defer n.l.Unlock()
+	n.l.RLock()
+	defer n.l.RUnlock()
 
 	return len(n.m)
 }
@@ -246,8 +246,8 @@ func (n *ConnectMap) Store(key string, value *Peer) {
 // value is present.
 // The ok result indicates whether value was found in the map.
 func (n *ConnectMap) Load(key string) (*Peer, bool) {
-	n.l.Lock()
-	defer n.l.Unlock()
+	n.l.RLock()
+	defer n.l.RUnlock()
 
 	v, has := n.m[key]
 	return v, has

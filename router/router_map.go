@@ -213,12 +213,12 @@ func (n *LConnMap) Range(f func(common.Coordinate, *logicalConnection) bool) {
 //ReceiverChanMap is a structure that manages received channel.
 type ReceiverChanMap struct {
 	l sync.Mutex
-	m map[string]chan Receiver
+	m map[string]chan net.Conn
 }
 
 // Load returns the value stored in the map for a key
 // if it does not exist then make it
-func (n *ReceiverChanMap) load(port int, ChainCoord common.Coordinate) chan Receiver {
+func (n *ReceiverChanMap) load(port int, ChainCoord common.Coordinate) chan net.Conn {
 	n.l.Lock()
 	defer n.l.Unlock()
 
@@ -226,9 +226,9 @@ func (n *ReceiverChanMap) load(port int, ChainCoord common.Coordinate) chan Rece
 
 	v, has := n.m[key]
 	if !has {
-		ch := make(chan Receiver, 128)
+		ch := make(chan net.Conn, 128)
 		if 0 == len(n.m) {
-			n.m = map[string]chan Receiver{
+			n.m = map[string]chan net.Conn{
 				key: ch,
 			}
 		} else {
