@@ -17,8 +17,9 @@ import (
 
 //Config is structure storing settings information
 type Config struct {
-	Port   uint16
-	Dbpath string
+	Port      uint16
+	Network   string
+	StorePath string
 }
 
 //EventHandler is callback when peer connected or closed
@@ -70,14 +71,14 @@ const (
 
 //NewManager is the peerManager creator.
 //Apply messages necessary for peer management.
-func NewManager(ChainCoord *common.Coordinate, mh *message.Handler, cfg Config, network, dbpath string) (*Manager, error) {
-	ns, err := NewNodeStore(dbpath)
+func NewManager(ChainCoord *common.Coordinate, mh *message.Handler, cfg Config) (*Manager, error) {
+	ns, err := NewNodeStore(cfg.StorePath)
 	if err != nil {
 		return nil, err
 	}
 	pm := &Manager{
 		ChainCoord:   ChainCoord,
-		router:       router.NewRouter(network, cfg.Port),
+		router:       router.NewRouter(cfg.Network, cfg.Port),
 		Handler:      mh,
 		nodes:        ns,             //make(map[string]peermessage.ConnectInfo),
 		candidates:   CandidateMap{}, //make(map[string]candidateState),
