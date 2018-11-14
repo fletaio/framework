@@ -26,7 +26,7 @@ func init() {
 }
 
 //SendPong creates a "pong" and sends a message.
-func SendPong(p message.SendInterfase, ping *Ping) {
+func SendPong(p message.SendInterface, ping *Ping) {
 	pong := &Pong{
 		Ping: *ping,
 	}

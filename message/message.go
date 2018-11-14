@@ -8,8 +8,8 @@ import (
 	"git.fleta.io/fleta/framework/log"
 )
 
-//SendInterfase is Default function of messenger
-type SendInterfase interface {
+//SendInterface is Default function of messenger
+type SendInterface interface {
 	Send(m Message)
 }
 

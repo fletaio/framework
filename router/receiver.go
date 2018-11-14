@@ -84,39 +84,8 @@ func (r *receiver) Recv() ([]byte, error) {
 
 //Write is write byte to buffer
 func (r *receiver) Write(data []byte) (int, error) {
-	n, err := r.writeBuf.Write(data)
-	if err != nil {
-		return n, err
-	}
-	if r.writeBuf.Len() > 4 {
-		err = r.Flush()
-	}
-	return n, err
-}
-
-//Flush sends all of the buffered data to Connection.
-func (r *receiver) Flush() (err error) {
-	if r.isClosed {
-		return io.EOF
-	}
-	defer func() {
-		if rc := recover(); rc != nil {
-			if _, is := rc.(error); is {
-				err = io.EOF
-			}
-		}
-	}()
-	if r.writeBuf.Len() == 0 {
-		log.Debug("receiver Flush empty")
-		r.sendChan <- []byte{}
-		return
-	}
-
-	bs := make([]byte, r.writeBuf.Len())
-	r.writeBuf.Read(bs)
-	r.sendChan <- bs
-
-	return
+	r.sendChan <- data
+	return len(data), nil
 }
 
 func (r *receiver) SetDeadline(t time.Time) error {
