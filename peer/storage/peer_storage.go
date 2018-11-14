@@ -56,7 +56,7 @@ func (a nodeList) Less(i, j int) bool {
 type peerStorage struct {
 	peerGroup map[peerGroupType]nodeList
 	peerMap   map[string]*peerInfomation
-	kickOut   KickOut
+	kickOut   kickOut
 }
 
 //IPeerStorage is a list of functions to be exposed to external sources.
@@ -79,10 +79,10 @@ type IPeer interface {
 type Score func(string) (time.Duration, bool)
 
 // KickOut is a function called when a peer is not needed.
-type KickOut func(p IPeer)
+type kickOut func(p IPeer)
 
 //NewPeerStorage is the PeerStorage creator.
-func NewPeerStorage(kickOut KickOut) IPeerStorage {
+func NewPeerStorage(kickOut kickOut) IPeerStorage {
 	ps := &peerStorage{
 		peerGroup: map[peerGroupType]nodeList{},
 		peerMap:   map[string]*peerInfomation{},
@@ -219,7 +219,7 @@ func (ps *peerStorage) insertSort(p *peerInfomation) bool {
 	} else if p.group > group2 && ps.insert(p, group2) {
 	} else if p.group > group1 && ps.insert(p, group1) {
 	} else {
-		log.Debug("close peer ", p.p.LocalAddr().String(), " ", p.p.RemoteAddr().String())
+		log.Debug("close peer ", p.p.LocalAddr(), " ", p.p.RemoteAddr())
 		ps.kickOut(p.p)
 		// p.p.Close()
 		return false

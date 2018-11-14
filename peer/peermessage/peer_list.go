@@ -17,17 +17,18 @@ type PeerList struct {
 
 //ConnectInfo TODO
 type ConnectInfo struct {
-	Address    string
-	PingTime   time.Duration
-	ScoreBoard *ScoreBoardMap
+	Address        string
+	PingTime       time.Duration
+	EvilScore      uint8
+	PingScoreBoard *ScoreBoardMap
 }
 
 //NewConnectInfo TODO
 func NewConnectInfo(addr string, t time.Duration) ConnectInfo {
 	return ConnectInfo{
-		Address:    addr,
-		PingTime:   t,
-		ScoreBoard: &ScoreBoardMap{},
+		Address:        addr,
+		PingTime:       t,
+		PingScoreBoard: &ScoreBoardMap{},
 	}
 }
 
@@ -36,6 +37,13 @@ func (ci *ConnectInfo) WriteTo(w io.Writer) (int64, error) {
 	var wrote int64
 	{
 		n, err := util.WriteUint64(w, uint64(ci.PingTime))
+		if err != nil {
+			return wrote, err
+		}
+		wrote += n
+	}
+	{
+		n, err := util.WriteUint8(w, ci.EvilScore)
 		if err != nil {
 			return wrote, err
 		}
@@ -79,6 +87,16 @@ func (ci *ConnectInfo) ReadFrom(r io.Reader) (int64, error) {
 			return read, err
 		}
 		read += n
+
+		ci.EvilScore = v
+	}
+
+	{
+		v, n, err := util.ReadUint8(r)
+		if err != nil {
+			return read, err
+		}
+		read += n
 		bsLen := v
 		bsBs := make([]byte, bsLen)
 
@@ -95,11 +113,11 @@ func (ci *ConnectInfo) ReadFrom(r io.Reader) (int64, error) {
 
 //Score TODO
 func (ci *ConnectInfo) Score() (score int64) {
-	ci.ScoreBoard.Range(func(addr string, t time.Duration) bool {
+	ci.PingScoreBoard.Range(func(addr string, t time.Duration) bool {
 		score += int64(t)
 		return true
 	})
-	score /= int64(ci.ScoreBoard.Len())
+	score /= int64(ci.PingScoreBoard.Len())
 	return score
 }
 

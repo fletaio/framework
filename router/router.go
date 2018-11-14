@@ -21,7 +21,7 @@ const mockMode = true
 //Router that converts external connections to logical connections.
 type Router interface {
 	AddListen(ChainCoord *common.Coordinate) error
-	Dial(addrStr string, ChainCoord *common.Coordinate) error
+	Request(addrStr string, ChainCoord *common.Coordinate) error
 	Accept(ChainCoord *common.Coordinate) (net.Conn, error)
 	Port() uint16
 	ConnList() []string
@@ -150,9 +150,9 @@ func (r *router) Accept(ChainCoord *common.Coordinate) (net.Conn, error) {
 	return receiver, nil
 }
 
-//Dial requests the connection by entering the address when a logical connection is required.
+//Request requests the connection by entering the address when a logical connection is required.
 //The chain coordinates support the connection between subchains.
-func (r *router) Dial(addrStr string, ChainCoord *common.Coordinate) error {
+func (r *router) Request(addrStr string, ChainCoord *common.Coordinate) error {
 	if r.localhost != "" && strings.HasPrefix(addrStr, r.localhost) {
 		return nil
 	}

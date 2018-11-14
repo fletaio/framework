@@ -10,8 +10,17 @@ import (
 	"git.fleta.io/fleta/framework/message"
 )
 
-//Peer is a structure that manages connections between nodes that cause logical connections.
-type Peer struct {
+//Peer is manages connections between nodes that cause logical connections.
+type Peer interface {
+	net.Conn
+	Send(m message.Message)
+	PingTime() time.Duration
+	SetPingTime(t time.Duration)
+	ConnectedTime() int64
+	IsClose() bool
+}
+
+type peer struct {
 	net.Conn
 	pingTime time.Duration
 	score    int64
@@ -26,8 +35,8 @@ type Peer struct {
 }
 
 //NewPeer is the peer creator.
-func NewPeer(conn net.Conn, mh *message.Handler, deletePeer func(addr string)) *Peer {
-	p := &Peer{
+func newPeer(conn net.Conn, mh *message.Handler, deletePeer func(addr string)) Peer {
+	p := &peer{
 		Conn:          conn,
 		pingTime:      -1,
 		mh:            mh,
@@ -41,12 +50,16 @@ func NewPeer(conn net.Conn, mh *message.Handler, deletePeer func(addr string)) *
 	return p
 }
 
-//ID returned peer ID
-func (p *Peer) ID() string {
-	return p.RemoteAddr().String()
+func (p *peer) ConnectedTime() int64 {
+	return p.connectedTime
 }
 
-func (p *Peer) readPacket() {
+//ID returned peer ID
+func (p *peer) ID() string {
+	return p.Conn.RemoteAddr().String()
+}
+
+func (p *peer) readPacket() {
 	for !p.closed {
 		BNum := make([]byte, 8)
 		n, err := p.Read(BNum)
@@ -65,42 +78,45 @@ func (p *Peer) readPacket() {
 }
 
 //Send conveys a message to the connected node.
-func (p *Peer) Send(m message.Message) {
+func (p *peer) Send(m message.Message) {
 	p.writeLock.Lock()
 	defer p.writeLock.Unlock()
 
 	mt := m.GetType()
+
 	bf := bytes.Buffer{}
 	bf.Write(message.TypeToByte(mt))
 	m.WriteTo(&bf)
 
-	p.Write(bf.Bytes())
+	bs := bf.Bytes()
+	p.Write(bs)
 }
 
 //PingTime return pingTime
-func (p *Peer) PingTime() time.Duration {
+func (p *peer) PingTime() time.Duration {
 	return p.pingTime
 }
 
 //SetPingTime set pingTime
-func (p *Peer) SetPingTime(t time.Duration) {
+func (p *peer) SetPingTime(t time.Duration) {
 	p.pingTime = t
 }
 
 //SetRegisteredTime set registeredTime
-func (p *Peer) SetRegisteredTime(t int64) {
+func (p *peer) SetRegisteredTime(t int64) {
 	p.registeredTime = t
 }
 
 //IsClose returns closed
-func (p *Peer) IsClose() bool {
+func (p *peer) IsClose() bool {
 	return p.closed
 }
 
 //Close is used to break logical connections and delete stored peer data.
-func (p *Peer) Close() {
+func (p *peer) Close() error {
 	p.closed = true
 	p.deletePeer(p.RemoteAddr().String())
 	p.Conn.Close()
 
+	return nil
 }

@@ -12,20 +12,20 @@ import (
 )
 
 //NodeStore is the structure of the connection information.
-type NodeStore struct {
+type nodeStore struct {
 	l  sync.Mutex
 	db *badger.DB
 	a  []peermessage.ConnectInfo
-	m  map[string]peermessage.ConnectInfo
+	m  map[string]*peermessage.ConnectInfo
 }
 
 //NewNodeStore is creator of NodeStore
-func NewNodeStore(dbpath string) (*NodeStore, error) {
+func newNodeStore(dbpath string) (*nodeStore, error) {
 	db, err := openNodesDB(dbpath)
 	if err != nil {
 		return nil, err
 	}
-	n := &NodeStore{
+	n := &nodeStore{
 		db: db,
 	}
 
@@ -42,8 +42,8 @@ func NewNodeStore(dbpath string) (*NodeStore, error) {
 
 			var ci peermessage.ConnectInfo
 			ci.ReadFrom(bf)
-			ci.ScoreBoard = &peermessage.ScoreBoardMap{}
-			n.Store(ci.Address, ci)
+			ci.PingScoreBoard = &peermessage.ScoreBoardMap{}
+			n.LoadOrStore(ci.Address, ci)
 		}
 		return nil
 	}); err != nil {
@@ -99,61 +99,66 @@ func openNodesDB(dbPath string) (*badger.DB, error) {
 // LoadOrStore returns the existing value for the key if present.
 // Otherwise, it stores and returns the given value.
 // The loaded result is true if the value was loaded, false if stored.
-func (n *NodeStore) LoadOrStore(key string, value peermessage.ConnectInfo) peermessage.ConnectInfo {
+func (n *nodeStore) LoadOrStore(key string, value peermessage.ConnectInfo) peermessage.ConnectInfo {
 	n.l.Lock()
 	defer n.l.Unlock()
 
 	if 0 == len(n.m) {
-		n.m = map[string]peermessage.ConnectInfo{
-			key: value,
-		}
-		n.a = []peermessage.ConnectInfo{value}
-		n.db.Update(func(txn *badger.Txn) error {
-			bf := bytes.Buffer{}
-			value.WriteTo(&bf)
-			if err := txn.Set([]byte(key), bf.Bytes()); err != nil {
-				return err
-			}
-			return nil
-		})
+		n.unsafeStore(key, value)
 	} else {
 		v, has := n.m[key]
 		if has {
-			return v
+			return *v
 		}
-		n.m[key] = value
-		n.a = append(n.a, value)
-		n.db.Update(func(txn *badger.Txn) error {
-			bf := bytes.Buffer{}
-			value.WriteTo(&bf)
-			if err := txn.Set([]byte(key), bf.Bytes()); err != nil {
-				return err
-			}
-			return nil
-		})
+		n.unsafeStore(key, value)
 	}
 	return value
 }
 
+// Update updates the value for a key.
+func (n *nodeStore) Update(key string, update func(peermessage.ConnectInfo) peermessage.ConnectInfo) bool {
+	v, has := n.m[key]
+	if has {
+		re := update(*v)
+		re.Address = v.Address
+		re.EvilScore = v.EvilScore
+		re.PingTime = v.PingTime
+
+		n.db.Update(func(txn *badger.Txn) error {
+			bf := bytes.Buffer{}
+			re.WriteTo(&bf)
+			if err := txn.Set([]byte(key), bf.Bytes()); err != nil {
+				return err
+			}
+			return nil
+		})
+
+	}
+	return has
+}
+
 // Store sets the value for a key.
-func (n *NodeStore) Store(key string, value peermessage.ConnectInfo) {
+func (n *nodeStore) Store(key string, value peermessage.ConnectInfo) {
 	n.l.Lock()
 	defer n.l.Unlock()
+	n.unsafeStore(key, value)
+}
 
+func (n *nodeStore) unsafeStore(key string, value peermessage.ConnectInfo) {
 	if 0 == len(n.m) {
-		n.m = map[string]peermessage.ConnectInfo{
-			key: value,
-		}
 		n.a = []peermessage.ConnectInfo{value}
+		n.m = map[string]*peermessage.ConnectInfo{
+			key: &n.a[0],
+		}
 	} else {
 		v, has := n.m[key]
 		if has {
 			v.Address = value.Address
 			v.PingTime = value.PingTime
-			v.ScoreBoard = value.ScoreBoard
+			v.PingScoreBoard = value.PingScoreBoard
 		} else {
-			n.m[key] = value
 			n.a = append(n.a, value)
+			n.m[key] = &n.a[len(n.a)-1]
 		}
 	}
 	n.db.Update(func(txn *badger.Txn) error {
@@ -167,7 +172,7 @@ func (n *NodeStore) Store(key string, value peermessage.ConnectInfo) {
 }
 
 // Get returns the value stored in the array for a index
-func (n *NodeStore) Get(i int) peermessage.ConnectInfo {
+func (n *nodeStore) Get(i int) peermessage.ConnectInfo {
 	if i < 0 || i > len(n.a) {
 		return peermessage.ConnectInfo{}
 	}
@@ -177,37 +182,41 @@ func (n *NodeStore) Get(i int) peermessage.ConnectInfo {
 // Load returns the value stored in the map for a key, or nil if no
 // value is present.
 // The ok result indicates whether value was found in the map.
-func (n *NodeStore) Load(key string) (peermessage.ConnectInfo, bool) {
+func (n *nodeStore) Load(key string) (peermessage.ConnectInfo, bool) {
 	n.l.Lock()
 	defer n.l.Unlock()
 
 	v, has := n.m[key]
-	return v, has
+	if has {
+		return *v, has
+	} else {
+		return peermessage.ConnectInfo{}, has
+	}
 }
 
-// Delete deletes the value for a key.
-func (n *NodeStore) Delete(key string) {
-	n.l.Lock()
-	defer n.l.Unlock()
+// // Delete deletes the value for a key.
+// func (n *nodeStore) Delete(key string) {
+// 	n.l.Lock()
+// 	defer n.l.Unlock()
 
-	delete(n.m, key)
-}
+// 	delete(n.m, key)
+// }
 
 // Range calls f sequentially for each key and value present in the map.
 // If f returns false, range stops the iteration.
-func (n *NodeStore) Range(f func(string, peermessage.ConnectInfo) bool) {
+func (n *nodeStore) Range(f func(string, peermessage.ConnectInfo) bool) {
 	n.l.Lock()
 	defer n.l.Unlock()
 
 	for key, value := range n.m {
-		if !f(key, value) {
+		if !f(key, *value) {
 			break
 		}
 	}
 }
 
 // Len returns the length of this map.
-func (n *NodeStore) Len() int {
+func (n *nodeStore) Len() int {
 	n.l.Lock()
 	defer n.l.Unlock()
 
@@ -215,13 +224,13 @@ func (n *NodeStore) Len() int {
 }
 
 //ConnectMap is the structure of peer list
-type ConnectMap struct {
+type connectMap struct {
 	l sync.RWMutex
-	m map[string]*Peer
+	m map[string]Peer
 }
 
 // Len returns to ConnectMap length
-func (n *ConnectMap) Len() int {
+func (n *connectMap) Len() int {
 	n.l.RLock()
 	defer n.l.RUnlock()
 
@@ -229,12 +238,12 @@ func (n *ConnectMap) Len() int {
 }
 
 // Store sets the value for a key.
-func (n *ConnectMap) Store(key string, value *Peer) {
+func (n *connectMap) Store(key string, value Peer) {
 	n.l.Lock()
 	defer n.l.Unlock()
 
 	if 0 == len(n.m) {
-		n.m = map[string]*Peer{
+		n.m = map[string]Peer{
 			key: value,
 		}
 	} else {
@@ -245,7 +254,7 @@ func (n *ConnectMap) Store(key string, value *Peer) {
 // Load returns the value stored in the map for a key, or nil if no
 // value is present.
 // The ok result indicates whether value was found in the map.
-func (n *ConnectMap) Load(key string) (*Peer, bool) {
+func (n *connectMap) Load(key string) (Peer, bool) {
 	n.l.RLock()
 	defer n.l.RUnlock()
 
@@ -254,7 +263,7 @@ func (n *ConnectMap) Load(key string) (*Peer, bool) {
 }
 
 // Delete deletes the value for a key.
-func (n *ConnectMap) Delete(key string) {
+func (n *connectMap) Delete(key string) {
 	n.l.Lock()
 	defer n.l.Unlock()
 
@@ -263,7 +272,23 @@ func (n *ConnectMap) Delete(key string) {
 
 // Range calls f sequentially for each key and value present in the map.
 // If f returns false, range stops the iteration.
-func (n *ConnectMap) Range(f func(string, *Peer) bool) {
+// func (n *connectMap) Range() <-chan *peer {
+// 	arr := make([]*peer, len(n.m))
+
+// 	for _, value := range n.m {
+// 		arr = append(arr, value)
+// 	}
+// 	pch := make(chan *peer)
+// 	go func() {
+// 		for _, v := range arr {
+// 			pch <- v
+// 		}
+// 		close(pch)
+// 	}()
+// 	return pch
+// }
+
+func (n *connectMap) Range(f func(string, Peer) bool) {
 	n.l.Lock()
 	defer n.l.Unlock()
 
@@ -275,13 +300,13 @@ func (n *ConnectMap) Range(f func(string, *Peer) bool) {
 }
 
 //CandidateMap is the structure of candidate list
-type CandidateMap struct {
+type candidateMap struct {
 	l sync.Mutex
 	m map[string]candidateState
 }
 
 // Store sets the value for a key.
-func (n *CandidateMap) store(key string, value candidateState) {
+func (n *candidateMap) store(key string, value candidateState) {
 	n.l.Lock()
 	defer n.l.Unlock()
 
@@ -297,7 +322,7 @@ func (n *CandidateMap) store(key string, value candidateState) {
 // Load returns the value stored in the map for a key, or nil if no
 // value is present.
 // The ok result indicates whether value was found in the map.
-func (n *CandidateMap) load(key string) (candidateState, bool) {
+func (n *candidateMap) load(key string) (candidateState, bool) {
 	n.l.Lock()
 	defer n.l.Unlock()
 
@@ -306,7 +331,7 @@ func (n *CandidateMap) load(key string) (candidateState, bool) {
 }
 
 // Delete deletes the value for a key.
-func (n *CandidateMap) delete(key string) {
+func (n *candidateMap) delete(key string) {
 	n.l.Lock()
 	defer n.l.Unlock()
 
@@ -315,7 +340,7 @@ func (n *CandidateMap) delete(key string) {
 
 // Range calls f sequentially for each key and value present in the map.
 // If f returns false, range stops the iteration.
-func (n *CandidateMap) rangeMap(f func(string, candidateState) bool) {
+func (n *candidateMap) rangeMap(f func(string, candidateState) bool) {
 	n.l.Lock()
 	defer n.l.Unlock()
 
