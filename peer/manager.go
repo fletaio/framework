@@ -26,6 +26,7 @@ type Config struct {
 type Manager interface {
 	RegisterEventHandler(eh EventHandler)
 	StartManage()
+	EnforceConnect()
 	AddNode(addr string) error
 	BroadCast(m message.Message)
 	NodeList() []string
@@ -55,8 +56,8 @@ type candidateState int
 
 const (
 	csDelete       candidateState = 0
-	csDialWait     candidateState = 1
-	csDialWait2    candidateState = 2
+	csRequestWait  candidateState = 1
+	csRequestWait2 candidateState = 2
 	csPongWait     candidateState = 4
 	csPeerListWait candidateState = 5
 )
@@ -124,14 +125,32 @@ func (pm *manager) StartManage() {
 	go pm.rotatePeer()
 }
 
+// EnforceConnect handles all of the Request standby nodes in the cardidate.
+func (pm *manager) EnforceConnect() {
+	dialList := []string{}
+	pm.candidates.rangeMap(func(addr string, cs candidateState) bool {
+		if cs == csRequestWait || cs == csRequestWait2 {
+			dialList = append(dialList, addr)
+		}
+		return true
+	})
+	for _, addr := range dialList {
+		err := pm.router.Request(addr, pm.ChainCoord)
+		if err != nil {
+			log.Error("EnforceConnect error ", err)
+		}
+		time.Sleep(time.Millisecond * 50)
+	}
+}
+
 // AddNode is used to register additional peers from outside.
 func (pm *manager) AddNode(addr string) error {
 	if pm.router.Localhost() != "" && strings.HasPrefix(addr, pm.router.Localhost()) {
 		return nil
 	}
 	if ci, has := pm.nodes.Load(addr); !has || ci.EvilScore < 100 {
-		pm.candidates.store(addr, csDialWait)
-		pm.doManageCandidate(addr, csDialWait)
+		pm.candidates.store(addr, csRequestWait)
+		pm.doManageCandidate(addr, csRequestWait)
 	}
 	// if err := pm.router.Request(addr, pm.ChainCoord); err != nil {
 	// 	log.Error("StartManage connect seednode ", err)
@@ -285,13 +304,13 @@ func (pm *manager) doManageCandidate(addr string, cs candidateState) candidateSt
 		return csDelete
 	}
 	switch cs {
-	case csDialWait:
+	case csRequestWait:
 		err := pm.router.Request(addr, pm.ChainCoord)
 		if err != nil {
 			log.Error("PeerListHandler err ", err)
 		}
-		return csDialWait2
-	case csDialWait2:
+		return csRequestWait2
+	case csRequestWait2:
 		pm.nodes.Update(addr, func(ci peermessage.ConnectInfo) peermessage.ConnectInfo {
 			ci.EvilScore += 40
 			return ci
@@ -304,13 +323,13 @@ func (pm *manager) doManageCandidate(addr string, cs candidateState) candidateSt
 		if p, has := pm.connections.Load(addr); has {
 			peermessage.SendPing(p, uint32(time.Now().UnixNano()), p.LocalAddr().String(), p.RemoteAddr().String())
 		} else {
-			return csDialWait
+			return csRequestWait
 		}
 	case csPeerListWait:
 		if p, has := pm.connections.Load(addr); has {
 			peermessage.SendRequestPeerList(p, pm.router.Localhost()+":"+strconv.Itoa(int(pm.router.Port())))
 		} else {
-			return csDialWait
+			return csRequestWait
 		}
 	}
 	return cs

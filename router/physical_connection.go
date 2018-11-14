@@ -271,7 +271,7 @@ func (pc *physicalConnection) _handshake(ChainCoord *common.Coordinate, body byt
 func (pc *physicalConnection) write(body []byte, ChainCoord *common.Coordinate) (wrote int64, err error) {
 	var writer bytes.Buffer
 	compression := UNCOMPRESSED
-	if len(body) > 10240 {
+	if len(body) > 1024*1024 {
 		compression = COMPRESSED
 	}
 
