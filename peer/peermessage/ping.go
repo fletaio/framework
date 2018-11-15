@@ -29,7 +29,7 @@ func init() {
 }
 
 //SendPing creates a "ping" and sends a message.
-func SendPing(p message.SendInterfase, time uint32, from, to string) {
+func SendPing(p message.SendInterface, time uint32, from, to string) {
 	ping := &Ping{
 		Time: time,
 		From: from,

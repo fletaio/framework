@@ -5,11 +5,12 @@ import (
 	"io"
 	"sync"
 
+	"git.fleta.io/fleta/common/hash"
 	"git.fleta.io/fleta/framework/log"
 )
 
-//SendInterfase is Default function of messenger
-type SendInterfase interface {
+//SendInterface is Default function of messenger
+type SendInterface interface {
 	Send(m Message)
 }
 
@@ -18,17 +19,8 @@ type Type uint64
 
 //DefineType is return string type
 func DefineType(t string) Type {
-	if l := len(t); l > 8 {
-		log.Panic("Check")
-	} else if l < 8 {
-		for i := l; i < 8; i++ {
-			t += " "
-		}
-		bs := make([]byte, 8)
-		copy(bs[:], t)
-		return Type(binary.BigEndian.Uint64(bs))
-	}
-	return Type(binary.BigEndian.Uint64([]byte(t)))
+	h := hash.Hash([]byte(t))
+	return Type(binary.BigEndian.Uint64(h[:8]))
 }
 
 // TypeToByte returns a byte array of the Type
