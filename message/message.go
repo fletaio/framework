@@ -9,28 +9,28 @@ import (
 	"git.fleta.io/fleta/framework/log"
 )
 
-//SendInterface is Default function of messenger
+// SendInterface is Default function of messenger
 type SendInterface interface {
 	Send(m Message)
 }
 
-//Type is message type
+// Type is message type
 type Type uint64
 
-//DefineType is return string type
+// DefineType is return string type
 func DefineType(t string) Type {
 	h := hash.Hash([]byte(t))
 	return Type(binary.BigEndian.Uint64(h[:8]))
 }
 
-// TypeToByte returns a byte array of the Type
+//  TypeToByte returns a byte array of the Type
 func TypeToByte(t Type) []byte {
 	bs := make([]byte, 8)
 	binary.BigEndian.PutUint64(bs, uint64(t))
 	return bs
 }
 
-//ByteToType returns a Type of the byte array
+// ByteToType returns a Type of the byte array
 func ByteToType(b []byte) Type {
 	if l := len(b); l > 8 {
 		log.Panic("Check")
@@ -42,76 +42,74 @@ func ByteToType(b []byte) Type {
 	return Type(binary.BigEndian.Uint64(b))
 }
 
-//Message TODO
+// Message TODO
 type Message interface {
 	io.WriterTo
 	io.ReaderFrom
-	GetType() Type
+	Type() Type
 }
 
-type creator func(r io.Reader) Message
-type handler func(m Message) error
+// Creator TODO
+type Creator func(r io.Reader) Message
 
-type messageTaker struct {
-	creator creator
-	handler handler
+// Handler TODO
+type Handler func(m Message) error
+
+type item struct {
+	creator Creator
+	handler Handler
 }
 
-//Handler is a structure that stores data for message processing.
-type Handler struct {
-	messages     map[Type]messageTaker
-	messagesLock sync.Mutex
+// Manager is a structure that stores data for message processing.
+type Manager struct {
+	messageHash     map[Type]*item
+	messageHashLock sync.Mutex
 }
 
-//NewHandler is messageHandler creator
-func NewHandler() *Handler {
-	return &Handler{
-		messages: make(map[Type]messageTaker),
+// NewManager returns a Manager
+func NewManager() *Manager {
+	return &Manager{
+		messageHash: make(map[Type]*item),
 	}
 }
 
-//MessageGenerator receives messages as Reader and processes them through the creator and handler.
-func (mh *Handler) MessageGenerator(r io.Reader, mt Type) (Message, error) {
-	mh.messagesLock.Lock()
-	c, has := mh.messages[mt]
-	mh.messagesLock.Unlock()
+// ParseMessage receives the data stream as a Reader and processes them through the creator and returns the message and the handler.
+func (mm *Manager) ParseMessage(r io.Reader, mt Type) (Message, Handler, error) {
+	mm.messageHashLock.Lock()
+	c, has := mm.messageHash[mt]
+	mm.messageHashLock.Unlock()
 	if !has {
-		return nil, ErrNotExistMessageTaker
+		return nil, nil, ErrUnknownMessage
 	}
-
-	m := c.creator(r)
-	if err := c.handler(m); err != nil {
-		return nil, err
-	}
-	return m, nil
+	return c.creator(r), c.handler, nil
 
 }
 
-//ApplyMessage is a function to register a message.
-//Register author and handler by type to use when receiving messages.
-func (mh *Handler) ApplyMessage(mt Type, c creator, h handler) error {
-	mh.messagesLock.Lock()
-	defer mh.messagesLock.Unlock()
-	_, has := mh.messages[mt]
+// ApplyMessage is a function to register a message.
+// Register author and handler by type to use when receiving messageHash.
+func (mm *Manager) ApplyMessage(mt Type, c Creator, h Handler) error {
+	mm.messageHashLock.Lock()
+	defer mm.messageHashLock.Unlock()
+	_, has := mm.messageHash[mt]
 	if has {
 		return ErrAlreadyAppliedMessage
 	}
 
-	mh.messages[mt] = messageTaker{
+	mm.messageHash[mt] = &item{
 		creator: c,
 		handler: h,
 	}
 	return nil
 }
 
-//DeleteMessage deletes registered messages.
-func (mh *Handler) DeleteMessage(m Type) error {
-	mh.messagesLock.Lock()
-	defer mh.messagesLock.Unlock()
-	_, has := mh.messages[m]
+// DeleteMessage deletes registered messageHash.
+func (mm *Manager) DeleteMessage(m Type) error {
+	mm.messageHashLock.Lock()
+	defer mm.messageHashLock.Unlock()
+	_, has := mm.messageHash[m]
 	if !has {
 		return ErrNotAppliedMessage
 	}
-	delete(mh.messages, m)
+	delete(mm.messageHash, m)
 	return nil
 }

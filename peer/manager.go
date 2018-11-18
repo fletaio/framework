@@ -33,9 +33,10 @@ type Manager interface {
 }
 
 type manager struct {
+	Config     *Config
 	ChainCoord *common.Coordinate
 	router     router.Router
-	Handler    *message.Handler
+	mm         *message.Manager
 	onReady    func(p *peer)
 
 	// nodes           NodeStore
@@ -64,15 +65,16 @@ const (
 
 //NewManager is the peerManager creator.
 //Apply messages necessary for peer management.
-func NewManager(ChainCoord *common.Coordinate, mh *message.Handler, cfg Config) (Manager, error) {
-	ns, err := newNodeStore(cfg.StorePath)
+func NewManager(ChainCoord *common.Coordinate, mm *message.Manager, Config *Config) (Manager, error) {
+	ns, err := newNodeStore(Config.StorePath)
 	if err != nil {
 		return nil, err
 	}
 	pm := &manager{
+		Config:       Config,
 		ChainCoord:   ChainCoord,
-		router:       router.NewRouter(cfg.Network, cfg.Port),
-		Handler:      mh,
+		router:       router.NewRouter(Config.Network, Config.Port),
+		mm:           mm,
 		nodes:        ns,             //make(map[string]peermessage.ConnectInfo),
 		candidates:   candidateMap{}, //make(map[string]candidateState),
 		connections:  connectMap{},   //make(map[string]*Peer),
@@ -81,11 +83,11 @@ func NewManager(ChainCoord *common.Coordinate, mh *message.Handler, cfg Config) 
 	pm.peerStorage = storage.NewPeerStorage(pm.kickOutPeerStorage)
 
 	//add ping message
-	mh.ApplyMessage(peermessage.PingMessageType, peermessage.PingCreator, pm.pingHandler)
+	mm.ApplyMessage(peermessage.PingMessageType, peermessage.PingCreator, pm.pingHandler)
 	//add pong message
-	mh.ApplyMessage(peermessage.PongMessageType, peermessage.PongCreator, pm.pongHandler)
+	mm.ApplyMessage(peermessage.PongMessageType, peermessage.PongCreator, pm.pongHandler)
 	//add requestPeerList message
-	mh.ApplyMessage(peermessage.PeerListMessageType, peermessage.PeerListCreator, pm.peerListHandler)
+	mm.ApplyMessage(peermessage.PeerListMessageType, peermessage.PeerListCreator, pm.peerListHandler)
 
 	return pm, nil
 }
@@ -112,7 +114,7 @@ func (pm *manager) StartManage() {
 				continue
 			}
 			go func(conn net.Conn) {
-				peer := newPeer(conn, pm.Handler, pm.deletePeer)
+				peer := newPeer(conn, pm.mm, pm.deletePeer)
 				pm.addPeer(peer)
 			}(conn)
 		}
@@ -421,7 +423,7 @@ func (pm *manager) deletePeer(addr string) {
 	pm.eventHandlerLock.Lock()
 	if p, has := pm.connections.Load(addr); has {
 		for _, eh := range pm.eventHandler {
-			eh.PeerClosed(p)
+			eh.PeerDisconnected(p)
 		}
 	}
 	pm.eventHandlerLock.Unlock()

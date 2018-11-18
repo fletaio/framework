@@ -24,7 +24,7 @@ type peer struct {
 	net.Conn
 	pingTime time.Duration
 	score    int64
-	mh       *message.Handler
+	mm       *message.Manager
 	closed   bool
 
 	registeredTime int64
@@ -35,11 +35,11 @@ type peer struct {
 }
 
 //NewPeer is the peer creator.
-func newPeer(conn net.Conn, mh *message.Handler, deletePeer func(addr string)) Peer {
+func newPeer(conn net.Conn, mm *message.Manager, deletePeer func(addr string)) Peer {
 	p := &peer{
 		Conn:          conn,
 		pingTime:      -1,
-		mh:            mh,
+		mm:            mm,
 		closed:        false,
 		deletePeer:    deletePeer,
 		connectedTime: time.Now().UnixNano(),
@@ -73,7 +73,15 @@ func (p *peer) readPacket() {
 		}
 
 		mt := message.ByteToType(BNum)
-		p.mh.MessageGenerator(p, mt)
+		m, h, err := p.mm.ParseMessage(p, mt)
+		if err != nil {
+			log.Error("recv parse message : ", err)
+			return
+		}
+		if err := h(m); err != nil {
+			log.Error("recv handle message : ", err)
+			return
+		}
 	}
 }
 
@@ -82,7 +90,7 @@ func (p *peer) Send(m message.Message) {
 	p.writeLock.Lock()
 	defer p.writeLock.Unlock()
 
-	mt := m.GetType()
+	mt := m.Type()
 
 	bf := bytes.Buffer{}
 	bf.Write(message.TypeToByte(mt))

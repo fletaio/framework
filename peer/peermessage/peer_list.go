@@ -8,14 +8,14 @@ import (
 	"git.fleta.io/fleta/framework/message"
 )
 
-//PeerList TODO
+// PeerList TODO
 type PeerList struct {
 	Request bool
 	From    string
 	List    map[string]ConnectInfo
 }
 
-//ConnectInfo TODO
+// ConnectInfo TODO
 type ConnectInfo struct {
 	Address        string
 	PingTime       time.Duration
@@ -23,7 +23,7 @@ type ConnectInfo struct {
 	PingScoreBoard *ScoreBoardMap
 }
 
-//NewConnectInfo TODO
+// NewConnectInfo TODO
 func NewConnectInfo(addr string, t time.Duration) ConnectInfo {
 	return ConnectInfo{
 		Address:        addr,
@@ -32,7 +32,7 @@ func NewConnectInfo(addr string, t time.Duration) ConnectInfo {
 	}
 }
 
-//WriteTo is a serialization function
+// WriteTo is a serialization function
 func (ci *ConnectInfo) WriteTo(w io.Writer) (int64, error) {
 	var wrote int64
 	{
@@ -68,7 +68,7 @@ func (ci *ConnectInfo) WriteTo(w io.Writer) (int64, error) {
 	return wrote, nil
 }
 
-// ReadFrom is a deserialization function
+//  ReadFrom is a deserialization function
 func (ci *ConnectInfo) ReadFrom(r io.Reader) (int64, error) {
 	var read int64
 	{
@@ -111,7 +111,7 @@ func (ci *ConnectInfo) ReadFrom(r io.Reader) (int64, error) {
 	return read, nil
 }
 
-//Score TODO
+// Score TODO
 func (ci *ConnectInfo) Score() (score int64) {
 	ci.PingScoreBoard.Range(func(addr string, t time.Duration) bool {
 		score += int64(t)
@@ -126,21 +126,21 @@ const (
 	requestFalse = byte('f')
 )
 
-//PeerListCreator TODO
+// PeerListCreator TODO
 func PeerListCreator(r io.Reader) message.Message {
 	p := &PeerList{}
 	p.ReadFrom(r)
 	return p
 }
 
-//PeerListMessageType TODO
+// PeerListMessageType TODO
 var PeerListMessageType message.Type
 
 func init() {
 	PeerListMessageType = message.DefineType("PeerList")
 }
 
-//SendRequestPeerList TODO
+// SendRequestPeerList TODO
 func SendRequestPeerList(p message.SendInterface, from string) {
 	peerList := &PeerList{
 		Request: true,
@@ -149,13 +149,13 @@ func SendRequestPeerList(p message.SendInterface, from string) {
 	p.Send(peerList)
 }
 
-//GetType is the basic function of "message".
-//Returns the type of message.
-func (p *PeerList) GetType() message.Type {
+// Type is the basic function of "message".
+// Returns the type of message.
+func (p *PeerList) Type() message.Type {
 	return PeerListMessageType
 }
 
-//WriteTo is a serialization function
+// WriteTo is a serialization function
 func (p *PeerList) WriteTo(w io.Writer) (int64, error) {
 	var wrote int64
 	{
@@ -203,7 +203,7 @@ func (p *PeerList) WriteTo(w io.Writer) (int64, error) {
 	return wrote, nil
 }
 
-// ReadFrom is a deserialization function
+//  ReadFrom is a deserialization function
 func (p *PeerList) ReadFrom(r io.Reader) (int64, error) {
 	var read int64
 	{

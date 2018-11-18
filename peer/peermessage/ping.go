@@ -7,28 +7,28 @@ import (
 	"git.fleta.io/fleta/framework/message"
 )
 
-//Ping is struct of ping message
+// Ping is struct of ping message
 type Ping struct {
 	Time uint32
 	From string
 	To   string
 }
 
-//PingCreator is ping creator
+// PingCreator is ping creator
 func PingCreator(r io.Reader) message.Message {
 	p := &Ping{}
 	p.ReadFrom(r)
 	return p
 }
 
-//PingMessageType is unique message type.
+// PingMessageType is unique message type.
 var PingMessageType message.Type
 
 func init() {
 	PingMessageType = message.DefineType("ping")
 }
 
-//SendPing creates a "ping" and sends a message.
+// SendPing creates a "ping" and sends a message.
 func SendPing(p message.SendInterface, time uint32, from, to string) {
 	ping := &Ping{
 		Time: time,
@@ -38,13 +38,13 @@ func SendPing(p message.SendInterface, time uint32, from, to string) {
 	p.Send(ping)
 }
 
-//GetType is the basic function of "message".
-//Returns the type of message.
-func (ping *Ping) GetType() message.Type {
+// Type is the basic function of "message".
+// Returns the type of message.
+func (ping *Ping) Type() message.Type {
 	return PingMessageType
 }
 
-//WriteTo is a serialization function
+// WriteTo is a serialization function
 func (ping *Ping) WriteTo(w io.Writer) (int64, error) {
 	var wrote int64
 	n, err := util.WriteUint32(w, ping.Time)
@@ -90,7 +90,7 @@ func (ping *Ping) WriteTo(w io.Writer) (int64, error) {
 	return wrote, nil
 }
 
-// ReadFrom is a deserialization function
+//  ReadFrom is a deserialization function
 func (ping *Ping) ReadFrom(r io.Reader) (int64, error) {
 	var read int64
 
