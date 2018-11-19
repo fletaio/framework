@@ -34,7 +34,7 @@ func newNodeStore(dbpath string) (*nodeStore, error) {
 		it := txn.NewIterator(opts)
 		defer it.Close()
 		for it.Rewind(); it.Valid(); it.Next() {
-			value, err := it.Item().Value()
+			value, err := it.Item().ValueCopy(nil)
 			if err != nil {
 				return err
 			}
@@ -65,12 +65,6 @@ func openNodesDB(dbPath string) (*badger.DB, error) {
 
 	db, err := badger.Open(opts)
 	if err != nil {
-		return nil, err
-	}
-
-	lockfile, err := os.OpenFile(lockfilePath, os.O_EXCL, 0)
-	if err != nil {
-		lockfile.Close()
 		return nil, err
 	}
 
