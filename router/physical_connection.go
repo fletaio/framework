@@ -23,16 +23,17 @@ type routerPhysical interface {
 }
 
 type physicalWriter interface {
-	write(body []byte, ChainCoord *common.Coordinate) (int64, error)
+	write(body []byte, ChainCoord *common.Coordinate, compression uint8) (int64, error)
 	RemoteAddr() net.Addr
 	LocalAddr() net.Addr
+	sendClose(ChainCoord *common.Coordinate) error
 }
 
 //MAGICWORD Start of packet
-const MAGICWORD = 'R'
-
-//HANDSHAKE Start of handshake packet
 const (
+	MAGICWORD  = 'R'
+	CLOSELCONN = 'C'
+
 	HANDSHAKE = 'H'
 	FORONE    = 1
 	REPEAT    = 8
@@ -54,8 +55,6 @@ type physicalConnection struct {
 	handshakeTimeMap *TimerMap
 	isClose          bool
 
-	Info      PhysicalConnectionInfo
-	lConnLock sync.Mutex
 	lConn     LConnMap
 	r         routerPhysical
 	localhost string
@@ -70,9 +69,8 @@ type readConn struct {
 	bs  []byte
 }
 
-func newPhysicalConnection(addr string, info PhysicalConnectionInfo, conn net.Conn, r routerPhysical) *physicalConnection {
+func newPhysicalConnection(addr string, conn net.Conn, r routerPhysical) *physicalConnection {
 	return &physicalConnection{
-		Info:             info,
 		PConn:            conn,
 		isClose:          false,
 		lConn:            LConnMap{},
@@ -92,7 +90,7 @@ func (pc *physicalConnection) run() error {
 		body, isHandshake, ChainCoord, err := pc.readConn()
 		if err != nil {
 			if err != io.EOF && err != io.ErrClosedPipe {
-				log.Error("physicalConnection run end ", err)
+				log.Error("physicalConnection end ", err)
 			}
 			pc.Close()
 			log.Debug("physicalConnection run end ", pc.localhost, " ", pc.PConn.RemoteAddr().String())
@@ -136,7 +134,39 @@ func (pc *physicalConnection) run() error {
 	}
 }
 
-func (pc *physicalConnection) write(body []byte, ChainCoord *common.Coordinate) (int64, error) {
+func (pc *physicalConnection) sendClose(ChainCoord *common.Coordinate) error {
+	pc.writeLock.Lock()
+	defer pc.writeLock.Unlock()
+
+	var wrote int64
+
+	if n, err := util.WriteUint8(pc.PConn, CLOSELCONN); err == nil {
+		wrote += n
+	} else {
+		return err
+	}
+
+	if n, err := ChainCoord.WriteTo(pc.PConn); err == nil {
+		wrote += int64(n)
+	} else {
+		return err
+	}
+
+	if n, err := util.WriteUint8(pc.PConn, UNCOMPRESSED); err == nil {
+		wrote += n
+	} else {
+		return err
+	}
+
+	if n, err := util.WriteUint32(pc.PConn, uint32(0)); err == nil {
+		wrote += n
+	} else {
+		return err
+	}
+	return nil
+}
+
+func (pc *physicalConnection) write(body []byte, ChainCoord *common.Coordinate, compression uint8) (int64, error) {
 	var wrote int64
 
 	pc.writeLock.Lock()
@@ -144,10 +174,6 @@ func (pc *physicalConnection) write(body []byte, ChainCoord *common.Coordinate) 
 
 	if pc.PConn == nil {
 		return wrote, ErrNotConnected
-	}
-	compression := UNCOMPRESSED
-	if len(body) > 1024*1024 {
-		compression = COMPRESSED
 	}
 
 	if n, err := util.WriteUint8(pc.PConn, MAGICWORD); err == nil {
@@ -235,6 +261,9 @@ func (pc *physicalConnection) readConn() (body []byte, isHandshake bool, ChainCo
 	}
 	if MAGICWORD != uint8(bs[0]) {
 		returnErr = ErrPacketNotStartedMagicword
+		if uint8(bs[0]) == CLOSELCONN {
+			returnErr = io.EOF
+		}
 		return
 	}
 
@@ -285,6 +314,9 @@ func (pc *physicalConnection) readBytes(n uint32) (read []byte, returnErr error)
 }
 
 func (pc *physicalConnection) sendToLogicalConn(bs []byte, ChainCoord *common.Coordinate) (err error) {
+	pc.lConn.lock()
+	defer pc.lConn.unlock()
+
 	if lConn, has := pc.lConn.load(*ChainCoord); has {
 		lConn.sendToLogical(bs)
 	} else {
@@ -294,17 +326,19 @@ func (pc *physicalConnection) sendToLogicalConn(bs []byte, ChainCoord *common.Co
 }
 
 func (pc *physicalConnection) makeLogicalConnenction(ChainCoord *common.Coordinate, ping time.Duration) (*logicalConnection, bool) {
-	pc.lConnLock.Lock()
-	defer pc.lConnLock.Unlock()
+	pc.lConn.lock()
+	defer pc.lConn.unlock()
 
 	l, has := pc.lConn.load(*ChainCoord)
 	if !has {
-		rChan := make(chan []byte, 2048)
-
-		l = newLConn(rChan, rChan, pc, ChainCoord, ping, pc.lConnCloseCallback)
+		closeChan := make(chan bool)
+		l = newLConn(pc, ChainCoord, ping, closeChan)
 		pc.lConn.store(*ChainCoord, l)
 
-		// go pc.runLConn(l)
+		go func(closeChan chan bool, ChainCoord *common.Coordinate) {
+			<-closeChan
+			pc.lConn.delete(*ChainCoord)
+		}(closeChan, ChainCoord)
 	}
 	new := !has
 	return l, new
@@ -383,22 +417,17 @@ func (pc *physicalConnection) LocalAddr() net.Addr {
 	return pc.PConn.LocalAddr()
 }
 
-func (pc *physicalConnection) lConnCloseCallback(cd *common.Coordinate) {
-	pc.lConn.delete(*cd)
-	if pc.lConn.len() == 0 {
-		pc.r.removePhysicalConnenction(pc)
-	}
-}
-
 //Close is used to sever all physical connections and logical connections related to physical connections
 func (pc *physicalConnection) Close() (err error) {
 	pc.isClose = true
 	err = pc.PConn.Close()
 
+	pc.lConn.lock()
 	pc.lConn.Range(func(c common.Coordinate, lc *logicalConnection) bool {
 		lc.Close()
 		return true
 	})
+	pc.lConn.unlock()
 
 	return
 }

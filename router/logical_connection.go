@@ -23,24 +23,26 @@ func (c *addr) String() string {
 }
 
 type logicalConnection struct {
-	ChainCoord    *common.Coordinate
-	recvChan      <-chan []byte
-	sendChan      chan<- []byte
-	PConn         physicalWriter
-	ping          time.Duration
-	readBuf       bytes.Buffer
-	isClosed      bool
-	closeCallback func(cd *common.Coordinate)
+	ChainCoord *common.Coordinate
+	recvChan   <-chan []byte
+	sendChan   chan<- []byte
+	PConn      physicalWriter
+	ping       time.Duration
+	readBuf    bytes.Buffer
+	isClosed   bool
+	close      chan<- bool
 }
 
-func newLConn(recvChan <-chan []byte, sendChan chan<- []byte, sendPConn physicalWriter, ChainCoord *common.Coordinate, ping time.Duration, closeCallback func(cd *common.Coordinate)) *logicalConnection {
+func newLConn(sendPConn physicalWriter, ChainCoord *common.Coordinate, ping time.Duration, close chan<- bool) *logicalConnection {
+	dataChan := make(chan []byte, 2048)
+
 	return &logicalConnection{
-		ChainCoord:    ChainCoord,
-		recvChan:      recvChan,
-		sendChan:      sendChan,
-		PConn:         sendPConn,
-		ping:          ping,
-		closeCallback: closeCallback,
+		ChainCoord: ChainCoord,
+		recvChan:   dataChan,
+		sendChan:   dataChan,
+		PConn:      sendPConn,
+		ping:       ping,
+		close:      close,
 	}
 }
 
@@ -66,7 +68,11 @@ func (l *logicalConnection) Read(b []byte) (int, error) {
 
 //Write is write byte to buffer
 func (l *logicalConnection) Write(data []byte) (int, error) {
-	n, err := l.PConn.write(data, l.ChainCoord)
+	var compression = UNCOMPRESSED
+	if len(data) > 1048576 {
+		compression = COMPRESSED
+	}
+	n, err := l.PConn.write(data, l.ChainCoord, compression)
 	return int(n), err
 }
 
@@ -100,8 +106,9 @@ func (l *logicalConnection) Close() error {
 	if l.isClosed != true {
 		l.isClosed = true
 		log.Debug("receiver close ", l.LocalAddr().String(), " ", l.RemoteAddr().String())
+		l.PConn.sendClose(l.ChainCoord)
 		close(l.sendChan)
-		l.closeCallback(l.ChainCoord)
+		l.close <- true
 	}
 	return nil
 }

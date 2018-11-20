@@ -93,14 +93,12 @@ func (r *router) Request(addr string, ChainCoord *common.Coordinate) error {
 		return ErrCannotRequestToLocal
 	}
 
-	if pi, err := r.PList.Get(addr); err != nil {
-		if err != badger.ErrKeyNotFound {
-			return err
-		}
-	} else {
-		if pi.EvilScore > uint16(r.Config.BanEvilScore) {
-			return ErrDoNotRequestToEvelNode
-		}
+	es, err := r.GetEvilScore(addr)
+	if err != nil {
+		return err
+	}
+	if es > uint16(r.Config.BanEvilScore) {
+		return ErrCanNotConnectToEvilNode
 	}
 
 	addr, _ = removePort(addr)
@@ -112,7 +110,13 @@ func (r *router) Request(addr string, ChainCoord *common.Coordinate) error {
 		if err != nil {
 			return err
 		}
-		pConn = r.incommingConn(conn)
+		pConn, err = r.incommingConn(conn)
+		if err != nil {
+			if err == ErrCanNotConnectToEvilNode {
+				conn.Close()
+			}
+			return err
+		}
 	}
 	r.PConnLock.Unlock()
 	pConn.handshake(ChainCoord)
@@ -154,7 +158,12 @@ func (r *router) listening(l net.Listener) {
 				continue
 			}
 			r.PConnLock.Lock()
-			r.incommingConn(conn)
+			_, err = r.incommingConn(conn)
+			if err != nil {
+				if err == ErrCanNotConnectToEvilNode {
+					conn.Close()
+				}
+			}
 			r.PConnLock.Unlock()
 		} else if has {
 			time.Sleep(time.Second * 1)
@@ -165,11 +174,20 @@ func (r *router) listening(l net.Listener) {
 }
 
 // GetEvilScore is get evel score
-func (r *router) GetEvilScore(addr string) (addEvilScore uint16, err error) {
+func (r *router) GetEvilScore(addr string) (EvilScore uint16, err error) {
 	pi, err := r.PList.Get(addr)
 	if err != nil {
-		return 0, err
+		if err == badger.ErrKeyNotFound {
+			pi = PhysicalConnectionInfo{
+				Addr:      addr,
+				EvilScore: 0,
+			}
+			r.PList.Store(pi)
+		} else {
+			return 0, err
+		}
 	}
+
 	return pi.EvilScore, nil
 }
 
@@ -184,21 +202,18 @@ func (r *router) UpdateEvilScore(addr string, addEvilScore uint16) error {
 	return r.PList.Store(pi)
 }
 
-func (r *router) incommingConn(conn net.Conn) *physicalConnection {
+func (r *router) incommingConn(conn net.Conn) (*physicalConnection, error) {
 	if r.localhost == "" {
 		r.SetLocalhost(conn.LocalAddr().String())
 	}
 
 	addr := conn.RemoteAddr().String()
-	pi, err := r.PList.Get(addr)
+	es, err := r.GetEvilScore(addr)
 	if err != nil {
-		if err == badger.ErrKeyNotFound {
-			pi = PhysicalConnectionInfo{
-				Addr:      addr,
-				EvilScore: 0,
-			}
-			r.PList.Store(pi)
-		}
+		return nil, err
+	}
+	if es > uint16(r.Config.BanEvilScore) {
+		return nil, ErrCanNotConnectToEvilNode
 	}
 
 	_, has := r.PConn[addr]
@@ -208,11 +223,11 @@ func (r *router) incommingConn(conn net.Conn) *physicalConnection {
 		conn.Close()
 	} else {
 		log.Debug("router run ", r.Localhost, " ", conn.RemoteAddr().String())
-		pc = newPhysicalConnection(addr, pi, conn, r)
+		pc = newPhysicalConnection(addr, conn, r)
 		r.PConn[addr] = pc
 		go pc.run()
 	}
-	return pc
+	return pc, nil
 }
 
 func (r *router) acceptConn(conn *logicalConnection, ChainCoord *common.Coordinate) error {
@@ -226,7 +241,7 @@ func (r *router) removePhysicalConnenction(pc *physicalConnection) error {
 	r.PConnLock.Lock()
 	defer r.PConnLock.Unlock()
 
-	delete(r.PConn, pc.Info.Addr)
+	delete(r.PConn, pc.RemoteAddr().String())
 	return pc.Close()
 }
 

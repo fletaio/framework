@@ -110,6 +110,14 @@ type LConnMap struct {
 	m map[common.Coordinate]*logicalConnection
 }
 
+func (n *LConnMap) lock() {
+	n.l.Lock()
+}
+
+func (n *LConnMap) unlock() {
+	n.l.Unlock()
+}
+
 // Store sets the value for a key.
 func (n *LConnMap) len() int {
 	return len(n.m)
@@ -117,7 +125,6 @@ func (n *LConnMap) len() int {
 
 // Store sets the value for a key.
 func (n *LConnMap) store(key common.Coordinate, value *logicalConnection) {
-	n.l.Lock()
 	if 0 == len(n.m) {
 		n.m = map[common.Coordinate]*logicalConnection{
 			key: value,
@@ -125,14 +132,11 @@ func (n *LConnMap) store(key common.Coordinate, value *logicalConnection) {
 	} else {
 		n.m[key] = value
 	}
-	n.l.Unlock()
 
 }
 
 // has returns true if there is a value in the store.
 func (n *LConnMap) has(key common.Coordinate) bool {
-	n.l.Lock()
-	defer n.l.Unlock()
 	_, has := n.m[key]
 	return has
 }
@@ -141,26 +145,18 @@ func (n *LConnMap) has(key common.Coordinate) bool {
 // value is present.
 // The ok result indicates whether value was found in the map.
 func (n *LConnMap) load(key common.Coordinate) (*logicalConnection, bool) {
-	n.l.Lock()
-	defer n.l.Unlock()
 	v, has := n.m[key]
 	return v, has
 }
 
 // Delete deletes the value for a key.
 func (n *LConnMap) delete(key common.Coordinate) {
-	n.l.Lock()
-	defer n.l.Unlock()
-
 	delete(n.m, key)
 }
 
 // Range calls f sequentially for each key and value present in the map.
 // If f returns false, range stops the iteration.
 func (n *LConnMap) Range(f func(common.Coordinate, *logicalConnection) bool) {
-	n.l.Lock()
-	defer n.l.Unlock()
-
 	for key, value := range n.m {
 		if !f(key, value) {
 			break

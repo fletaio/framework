@@ -15,5 +15,5 @@ var (
 	ErrNotFoundListener          = errors.New("not found listener")
 	ErrCannotRequestToLocal      = errors.New("cannot request to local")
 	ErrNotFoundPort              = errors.New("not found port")
-	ErrDoNotRequestToEvelNode    = errors.New("do not request to evel node")
+	ErrCanNotConnectToEvilNode   = errors.New("can not connect to evil node")
 )

@@ -1,7 +1,10 @@
 package router
 
 import (
+	"context"
+	"math/rand"
 	"net"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -374,6 +377,7 @@ func Test_router_UpdateEvilScore(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    args
+		want    string
 		wantErr error
 	}{
 		{
@@ -391,21 +395,23 @@ func Test_router_UpdateEvilScore(t *testing.T) {
 					StorePath: "./test/evilscore2/",
 				},
 			},
-			wantErr: ErrDoNotRequestToEvelNode,
+			want:    "NotConnected",
+			wantErr: ErrCanNotConnectToEvilNode,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			os.RemoveAll(tt.args.Config1.StorePath)
+			os.RemoveAll(tt.args.Config2.StorePath)
 			r1, _ := NewRouter(tt.args.Config1)
 			r2, _ := NewRouter(tt.args.Config2)
 
 			r1.AddListen(tt.args.ChainCoord)
 			r2.AddListen(tt.args.ChainCoord)
 
-			r2.Request("evilscore1:3004", tt.args.ChainCoord)
-
 			wg := sync.WaitGroup{}
 			wg.Add(2)
+			r2.Request("evilscore1:3004", tt.args.ChainCoord)
 
 			var readConn net.Conn
 			go func() {
@@ -417,17 +423,136 @@ func Test_router_UpdateEvilScore(t *testing.T) {
 				r2.Accept(tt.args.ChainCoord)
 				wg.Done()
 			}()
+
 			wg.Wait()
 
 			r1.UpdateEvilScore(readConn.RemoteAddr().String(), 1000)
 			readConn.Close()
 
-			time.Sleep(time.Second)
+			time.Sleep(time.Second * 3)
 
 			err := r1.Request("evilscore2:3004", tt.args.ChainCoord)
 
 			if err != tt.wantErr {
 				t.Errorf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			wg.Add(2)
+
+			acceptChan := make(chan string)
+
+			r2.Request("evilscore1:3004", tt.args.ChainCoord)
+			go func() {
+				wg.Done()
+				r1.Accept(tt.args.ChainCoord)
+				acceptChan <- "Connected"
+			}()
+			go func() {
+				wg.Done()
+				r2.Accept(tt.args.ChainCoord)
+				acceptChan <- "Connected"
+			}()
+			wg.Wait()
+
+			now := time.Now()
+			earliest := now.Add(time.Second * 3)
+			ctx, cancel := context.WithDeadline(context.Background(), earliest)
+			defer cancel()
+
+			var result string
+
+			select {
+			case <-ctx.Done():
+				result = tt.want
+			case result = <-acceptChan:
+			}
+
+			if result != tt.want {
+				t.Errorf("result = %v, want %v", result, tt.want)
+			}
+		})
+	}
+}
+
+func Test_Compress(t *testing.T) {
+	type args struct {
+		ChainCoord *common.Coordinate
+		Config1    *Config
+		Config2    *Config
+	}
+	tests := []struct {
+		name string
+		args args
+		want bool
+	}{
+		{
+			name: "string",
+			args: args{
+				ChainCoord: &common.Coordinate{},
+				Config1: &Config{
+					Network:   "mock:Compress1",
+					Port:      3006,
+					StorePath: "./test/Compress1/",
+				},
+				Config2: &Config{
+					Network:   "mock:Compress2",
+					Port:      3006,
+					StorePath: "./test/Compress2/",
+				},
+			},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r1, _ := NewRouter(tt.args.Config1)
+			r2, _ := NewRouter(tt.args.Config2)
+
+			r1.AddListen(tt.args.ChainCoord)
+			r2.AddListen(tt.args.ChainCoord)
+
+			r2.Request("Compress1:3006", tt.args.ChainCoord)
+
+			wg := sync.WaitGroup{}
+			wg.Add(2)
+
+			msg := make([]byte, 1024*1025)
+			for i := 0; i < len(msg); i++ {
+				msg[i] = uint8(rand.Uint32() / 4)
+			}
+
+			var readConn net.Conn
+			var writeConn net.Conn
+			go func() {
+				conn, _, _ := r1.Accept(tt.args.ChainCoord)
+				readConn = conn
+				wg.Done()
+			}()
+			go func() {
+				conn, _, _ := r2.Accept(tt.args.ChainCoord)
+				writeConn = conn
+				wg.Done()
+			}()
+			wg.Wait()
+
+			wg.Add(1)
+			strChan := make(chan string)
+			go func() {
+				wg.Wait()
+				bs := make([]byte, 1024*1025)
+				n, _ := readConn.Read(bs)
+				strChan <- string(bs[:n])
+			}()
+
+			go func() {
+				writeConn.Write(msg)
+				wg.Done()
+			}()
+
+			result := <-strChan
+
+			if (result == string(msg)) != tt.want {
+				t.Errorf("result = %v, want %v", result, tt.want)
 			}
 		})
 	}
