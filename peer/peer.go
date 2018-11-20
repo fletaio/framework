@@ -35,15 +35,17 @@ type peer struct {
 }
 
 //NewPeer is the peer creator.
-func newPeer(conn net.Conn, mm *message.Manager, deletePeer func(addr string)) Peer {
+func newPeer(conn net.Conn, pingTime time.Duration, mm *message.Manager, deletePeer func(addr string)) Peer {
 	p := &peer{
 		Conn:          conn,
-		pingTime:      -1,
+		pingTime:      pingTime,
 		mm:            mm,
 		closed:        false,
 		deletePeer:    deletePeer,
 		connectedTime: time.Now().UnixNano(),
 	}
+
+	log.Info("add peer ", pingTime)
 
 	go p.readPacket()
 

@@ -34,7 +34,7 @@ func newNodeStore(dbpath string) (*nodeStore, error) {
 		it := txn.NewIterator(opts)
 		defer it.Close()
 		for it.Rewind(); it.Valid(); it.Next() {
-			value, err := it.Item().Value()
+			value, err := it.Item().ValueCopy(nil)
 			if err != nil {
 				return err
 			}
@@ -65,12 +65,6 @@ func openNodesDB(dbPath string) (*badger.DB, error) {
 
 	db, err := badger.Open(opts)
 	if err != nil {
-		return nil, err
-	}
-
-	lockfile, err := os.OpenFile(lockfilePath, os.O_EXCL, 0)
-	if err != nil {
-		lockfile.Close()
 		return nil, err
 	}
 
@@ -120,13 +114,12 @@ func (n *nodeStore) Update(key string, update func(peermessage.ConnectInfo) peer
 	v, has := n.m[key]
 	if has {
 		re := update(*v)
-		re.Address = v.Address
-		re.EvilScore = v.EvilScore
-		re.PingTime = v.PingTime
+		v.Address = re.Address
+		v.PingTime = re.PingTime
 
 		n.db.Update(func(txn *badger.Txn) error {
 			bf := bytes.Buffer{}
-			re.WriteTo(&bf)
+			v.WriteTo(&bf)
 			if err := txn.Set([]byte(key), bf.Bytes()); err != nil {
 				return err
 			}
@@ -182,16 +175,15 @@ func (n *nodeStore) Get(i int) peermessage.ConnectInfo {
 // Load returns the value stored in the map for a key, or nil if no
 // value is present.
 // The ok result indicates whether value was found in the map.
-func (n *nodeStore) Load(key string) (peermessage.ConnectInfo, bool) {
+func (n *nodeStore) Load(key string) (p peermessage.ConnectInfo, has bool) {
 	n.l.Lock()
 	defer n.l.Unlock()
 
 	v, has := n.m[key]
 	if has {
-		return *v, has
-	} else {
-		return peermessage.ConnectInfo{}, has
+		p = *v
 	}
+	return
 }
 
 // // Delete deletes the value for a key.

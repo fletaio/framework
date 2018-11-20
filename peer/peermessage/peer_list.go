@@ -19,7 +19,6 @@ type PeerList struct {
 type ConnectInfo struct {
 	Address        string
 	PingTime       time.Duration
-	EvilScore      uint8
 	PingScoreBoard *ScoreBoardMap
 }
 
@@ -37,13 +36,6 @@ func (ci *ConnectInfo) WriteTo(w io.Writer) (int64, error) {
 	var wrote int64
 	{
 		n, err := util.WriteUint64(w, uint64(ci.PingTime))
-		if err != nil {
-			return wrote, err
-		}
-		wrote += n
-	}
-	{
-		n, err := util.WriteUint8(w, ci.EvilScore)
 		if err != nil {
 			return wrote, err
 		}
@@ -68,7 +60,7 @@ func (ci *ConnectInfo) WriteTo(w io.Writer) (int64, error) {
 	return wrote, nil
 }
 
-//  ReadFrom is a deserialization function
+// ReadFrom is a deserialization function
 func (ci *ConnectInfo) ReadFrom(r io.Reader) (int64, error) {
 	var read int64
 	{
@@ -79,16 +71,6 @@ func (ci *ConnectInfo) ReadFrom(r io.Reader) (int64, error) {
 		read += n
 
 		ci.PingTime = time.Duration(v)
-	}
-
-	{
-		v, n, err := util.ReadUint8(r)
-		if err != nil {
-			return read, err
-		}
-		read += n
-
-		ci.EvilScore = v
 	}
 
 	{
@@ -203,7 +185,7 @@ func (p *PeerList) WriteTo(w io.Writer) (int64, error) {
 	return wrote, nil
 }
 
-//  ReadFrom is a deserialization function
+// ReadFrom is a deserialization function
 func (p *PeerList) ReadFrom(r io.Reader) (int64, error) {
 	var read int64
 	{

@@ -59,7 +59,7 @@ type peerStorage struct {
 	kickOut   kickOut
 }
 
-//IPeerStorage is a list of functions to be exposed to external sources.
+// IPeerStorage is a list of functions to be exposed to external sources.
 type IPeerStorage interface {
 	Add(peer IPeer, scoreFunc Score) bool
 	List() []string
@@ -67,7 +67,7 @@ type IPeerStorage interface {
 	NotEnoughPeer() bool
 }
 
-//IPeer is a functional list of Peer structures to be used internally.
+// IPeer is a functional list of Peer structures to be used internally.
 type IPeer interface {
 	RemoteAddr() net.Addr
 	LocalAddr() net.Addr

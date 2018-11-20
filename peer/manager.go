@@ -1,11 +1,14 @@
 package peer
 
 import (
+	"errors"
 	"net"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/dgraph-io/badger"
 
 	"git.fleta.io/fleta/common"
 	"git.fleta.io/fleta/framework/log"
@@ -17,10 +20,14 @@ import (
 
 //Config is structure storing settings information
 type Config struct {
-	Port      uint16
-	Network   string
-	StorePath string
+	StorePath    string
+	BanEvilScore uint16
 }
+
+// peer errors
+var (
+	ErrNotFoundPeer = errors.New("not found peer")
+)
 
 //Manager manages peer-connected networks.
 type Manager interface {
@@ -30,6 +37,9 @@ type Manager interface {
 	AddNode(addr string) error
 	BroadCast(m message.Message)
 	NodeList() []string
+	ConnectedList() []string
+	TargetCast(addr string, m message.Message) error
+	ExceptCast(addr string, m message.Message)
 }
 
 type manager struct {
@@ -65,7 +75,7 @@ const (
 
 //NewManager is the peerManager creator.
 //Apply messages necessary for peer management.
-func NewManager(ChainCoord *common.Coordinate, mm *message.Manager, Config *Config) (Manager, error) {
+func NewManager(ChainCoord *common.Coordinate, r router.Router, mm *message.Manager, Config *Config) (Manager, error) {
 	ns, err := newNodeStore(Config.StorePath)
 	if err != nil {
 		return nil, err
@@ -73,7 +83,7 @@ func NewManager(ChainCoord *common.Coordinate, mm *message.Manager, Config *Conf
 	pm := &manager{
 		Config:       Config,
 		ChainCoord:   ChainCoord,
-		router:       router.NewRouter(Config.Network, Config.Port),
+		router:       r,
 		mm:           mm,
 		nodes:        ns,             //make(map[string]peermessage.ConnectInfo),
 		candidates:   candidateMap{}, //make(map[string]candidateState),
@@ -82,10 +92,6 @@ func NewManager(ChainCoord *common.Coordinate, mm *message.Manager, Config *Conf
 	}
 	pm.peerStorage = storage.NewPeerStorage(pm.kickOutPeerStorage)
 
-	//add ping message
-	mm.ApplyMessage(peermessage.PingMessageType, peermessage.PingCreator, pm.pingHandler)
-	//add pong message
-	mm.ApplyMessage(peermessage.PongMessageType, peermessage.PongCreator, pm.pongHandler)
 	//add requestPeerList message
 	mm.ApplyMessage(peermessage.PeerListMessageType, peermessage.PeerListCreator, pm.peerListHandler)
 
@@ -109,12 +115,12 @@ func (pm *manager) StartManage() {
 		}()
 		wg.Done()
 		for {
-			conn, err := pm.router.Accept(pm.ChainCoord)
+			conn, pingTime, err := pm.router.Accept(pm.ChainCoord)
 			if err != nil {
 				continue
 			}
 			go func(conn net.Conn) {
-				peer := newPeer(conn, pm.mm, pm.deletePeer)
+				peer := newPeer(conn, pingTime, pm.mm, pm.deletePeer)
 				pm.addPeer(peer)
 			}(conn)
 		}
@@ -150,10 +156,18 @@ func (pm *manager) AddNode(addr string) error {
 	if pm.router.Localhost() != "" && strings.HasPrefix(addr, pm.router.Localhost()) {
 		return nil
 	}
-	if ci, has := pm.nodes.Load(addr); !has || ci.EvilScore < 100 {
+
+	evilScore, err := pm.router.GetEvilScore(addr)
+	if err != nil {
+		if err != badger.ErrKeyNotFound {
+			return err
+		}
+	}
+	if evilScore < pm.Config.BanEvilScore {
 		pm.candidates.store(addr, csRequestWait)
 		pm.doManageCandidate(addr, csRequestWait)
 	}
+	log.Debug("AddNode ", pm.router.Localhost(), addr)
 	// if err := pm.router.Request(addr, pm.ChainCoord); err != nil {
 	// 	log.Error("StartManage connect seednode ", err)
 	// 	return err
@@ -170,6 +184,16 @@ func (pm *manager) BroadCast(m message.Message) {
 	// }
 	pm.connections.Range(func(addr string, p Peer) bool {
 		p.Send(m)
+		return true
+	})
+}
+
+//BroadCast is used to propagate messages to all nodes.
+func (pm *manager) ExceptCast(exceptAddr string, m message.Message) {
+	pm.connections.Range(func(addr string, p Peer) bool {
+		if exceptAddr != addr {
+			p.Send(m)
+		}
 		return true
 	})
 }
@@ -198,45 +222,27 @@ func (pm *manager) NodeList() []string {
 }
 
 //CandidateList is returns the address of the node waiting for the operation.
-func (pm *manager) CandidateList() []string {
-	list := make([]string, 0)
-	pm.candidates.rangeMap(func(addr string, cs candidateState) bool {
-		list = append(list, addr+","+strconv.Itoa(int(cs)))
+func (pm *manager) ConnectedList() []string {
+	list := make([]string, pm.connections.Len())
+	pm.connections.Range(func(addr string, p Peer) bool {
+		list = append(list, addr)
 		return true
 	})
 	return list
 }
 
+//CandidateList is returns the address of the node waiting for the operation.
+func (pm *manager) TargetCast(addr string, m message.Message) error {
+	if p, has := pm.connections.Load(addr); has {
+		p.Send(m)
+		return nil
+	}
+	return ErrNotFoundPeer
+}
+
 //GroupList returns a list of peer groups.
 func (pm *manager) GroupList() []string {
 	return pm.peerStorage.List()
-}
-
-func (pm *manager) pingHandler(m message.Message) error {
-	if ping, ok := m.(*peermessage.Ping); ok {
-		log.Debug("PingHandler ", pm.router.Port(), " ", ping.From, " ", ping.To)
-
-		if p, has := pm.connections.Load(ping.From); has {
-			peermessage.SendPong(p, ping)
-		}
-	}
-	return nil
-}
-
-func (pm *manager) pongHandler(m message.Message) error {
-	if pong, ok := m.(*peermessage.Pong); ok {
-		pingTime := time.Duration(int64(uint32(time.Now().UnixNano()) - pong.Time))
-
-		if p, has := pm.connections.Load(pong.To); has {
-			p.SetPingTime(pingTime)
-			addr := p.RemoteAddr().String()
-			pm.nodes.LoadOrStore(addr, peermessage.NewConnectInfo(addr, p.PingTime()))
-			pm.candidates.store(addr, csPeerListWait)
-
-			peermessage.SendRequestPeerList(p, pong.From)
-		}
-	}
-	return nil
 }
 
 func (pm *manager) peerListHandler(m message.Message) error {
@@ -275,7 +281,6 @@ func (pm *manager) peerListHandler(m message.Message) error {
 				}
 
 				pm.AddNode(ci.Address)
-				time.Sleep(time.Millisecond * 50)
 			}
 
 			if p, connectionHas := pm.connections.Load(peerList.From); connectionHas {
@@ -313,23 +318,14 @@ func (pm *manager) doManageCandidate(addr string, cs candidateState) candidateSt
 		}
 		return csRequestWait2
 	case csRequestWait2:
-		pm.nodes.Update(addr, func(ci peermessage.ConnectInfo) peermessage.ConnectInfo {
-			ci.EvilScore += 40
-			return ci
-		})
+		pm.router.UpdateEvilScore(addr, 40)
 		err := pm.router.Request(addr, pm.ChainCoord)
 		if err != nil {
 			log.Error("PeerListHandler err ", err)
 		}
-	case csPongWait:
-		if p, has := pm.connections.Load(addr); has {
-			peermessage.SendPing(p, uint32(time.Now().UnixNano()), p.LocalAddr().String(), p.RemoteAddr().String())
-		} else {
-			return csRequestWait
-		}
 	case csPeerListWait:
 		if p, has := pm.connections.Load(addr); has {
-			peermessage.SendRequestPeerList(p, pm.router.Localhost()+":"+strconv.Itoa(int(pm.router.Port())))
+			peermessage.SendRequestPeerList(p, p.LocalAddr().String())
 		} else {
 			return csRequestWait
 		}
@@ -453,7 +449,7 @@ func (pm *manager) addPeer(p Peer) {
 
 		go func(p Peer) {
 			for p.PingTime() == -1 && p.IsClose() == false {
-				peermessage.SendPing(p, uint32(time.Now().UnixNano()), p.LocalAddr().String(), p.RemoteAddr().String())
+				peermessage.SendRequestPeerList(p, p.LocalAddr().String())
 				time.Sleep(time.Second * 3)
 			}
 		}(p)
