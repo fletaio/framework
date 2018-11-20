@@ -13,4 +13,7 @@ var (
 	ErrPacketNotStartedMagicword = errors.New("packet not started magicword")
 	ErrInvalidIntegrity          = errors.New("invalid integrity")
 	ErrNotFoundListener          = errors.New("not found listener")
+	ErrCannotRequestToLocal      = errors.New("cannot request to local")
+	ErrNotFoundPort              = errors.New("not found port")
+	ErrDoNotRequestToEvelNode    = errors.New("do not request to evel node")
 )

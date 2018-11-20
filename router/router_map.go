@@ -4,6 +4,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"time"
 
 	"git.fleta.io/fleta/common"
 )
@@ -11,7 +12,7 @@ import (
 //ListenerMap is a structure for router waiting to listening.
 type ListenerMap struct {
 	l sync.Mutex
-	m map[RemoteAddr]ListenerState
+	m map[string]ListenerState
 }
 
 //ListenState is type of listener's status
@@ -31,11 +32,11 @@ type ListenerState struct {
 }
 
 // Store sets the value for a key.
-func (n *ListenerMap) Store(key RemoteAddr, chain *common.Coordinate, value net.Listener) {
+func (n *ListenerMap) Store(key string, chain *common.Coordinate, value net.Listener) {
 	n.l.Lock()
 	defer n.l.Unlock()
 	if 0 == len(n.m) {
-		n.m = map[RemoteAddr]ListenerState{
+		n.m = map[string]ListenerState{
 			key: ListenerState{l: value, s: listening, cl: map[common.Coordinate]ListenState{*chain: listening}},
 		}
 	} else {
@@ -51,7 +52,7 @@ func (n *ListenerMap) Store(key RemoteAddr, chain *common.Coordinate, value net.
 // Load returns the value stored in the map for a key, or nil if no
 // value is present.
 // The ok result indicates whether value was found in the map.
-func (n *ListenerMap) Load(key RemoteAddr) (ListenerState, bool) {
+func (n *ListenerMap) Load(key string) (ListenerState, bool) {
 	n.l.Lock()
 	defer n.l.Unlock()
 	v, has := n.m[key]
@@ -65,7 +66,7 @@ func (ls *ListenerState) State() ListenState {
 
 // UpdateState updates the status of the lower listener and returns the entire status.
 // the "entire status" is calculated as the AND of the lower listener
-func (n *ListenerMap) UpdateState(key RemoteAddr, chain *common.Coordinate, state ListenState) (ListenState, error) {
+func (n *ListenerMap) UpdateState(key string, chain *common.Coordinate, state ListenState) (ListenState, error) {
 	n.l.Lock()
 	defer n.l.Unlock()
 	if v, has := n.m[key]; has {
@@ -83,7 +84,7 @@ func (n *ListenerMap) UpdateState(key RemoteAddr, chain *common.Coordinate, stat
 }
 
 // // Delete deletes the value for a key.
-// func (n *ListenerMap) Delete(key RemoteAddr) {
+// func (n *ListenerMap) Delete(key string) {
 // 	n.l.Lock()
 // 	defer n.l.Unlock()
 
@@ -92,7 +93,7 @@ func (n *ListenerMap) UpdateState(key RemoteAddr, chain *common.Coordinate, stat
 
 // // Range calls f sequentially for each key and value present in the map.
 // // If f returns false, range stops the iteration.
-// func (n *ListenerMap) Range(f func(RemoteAddr, net.Listener) bool) {
+// func (n *ListenerMap) Range(f func(string, net.Listener) bool) {
 // 	n.l.Lock()
 // 	defer n.l.Unlock()
 
@@ -102,57 +103,6 @@ func (n *ListenerMap) UpdateState(key RemoteAddr, chain *common.Coordinate, stat
 // 		}
 // 	}
 // }
-
-//PConnMap is a structure that manages physical connections.
-type PConnMap struct {
-	l sync.Mutex
-	m map[RemoteAddr]*physicalConnection
-}
-
-// Store sets the value for a key.
-func (n *PConnMap) store(key RemoteAddr, value *physicalConnection) {
-	n.l.Lock()
-	if 0 == len(n.m) {
-		n.m = map[RemoteAddr]*physicalConnection{
-			key: value,
-		}
-	} else {
-		n.m[key] = value
-	}
-	n.l.Unlock()
-
-}
-
-// Load returns the value stored in the map for a key, or nil if no
-// value is present.
-// The ok result indicates whether value was found in the map.
-func (n *PConnMap) load(key RemoteAddr) (*physicalConnection, bool) {
-	n.l.Lock()
-	defer n.l.Unlock()
-	v, has := n.m[key]
-	return v, has
-}
-
-// Delete deletes the value for a key.
-func (n *PConnMap) delete(key RemoteAddr) {
-	n.l.Lock()
-	defer n.l.Unlock()
-
-	delete(n.m, key)
-}
-
-// Range calls f sequentially for each key and value present in the map.
-// If f returns false, range stops the iteration.
-func (n *PConnMap) Range(f func(RemoteAddr, *physicalConnection) bool) {
-	n.l.Lock()
-	defer n.l.Unlock()
-
-	for key, value := range n.m {
-		if !f(key, value) {
-			break
-		}
-	}
-}
 
 //LConnMap is a structure that manages logical connections.
 type LConnMap struct {
@@ -177,6 +127,14 @@ func (n *LConnMap) store(key common.Coordinate, value *logicalConnection) {
 	}
 	n.l.Unlock()
 
+}
+
+// has returns true if there is a value in the store.
+func (n *LConnMap) has(key common.Coordinate) bool {
+	n.l.Lock()
+	defer n.l.Unlock()
+	_, has := n.m[key]
+	return has
 }
 
 // Load returns the value stored in the map for a key, or nil if no
@@ -213,12 +171,12 @@ func (n *LConnMap) Range(f func(common.Coordinate, *logicalConnection) bool) {
 //ReceiverChanMap is a structure that manages received channel.
 type ReceiverChanMap struct {
 	l sync.Mutex
-	m map[string]chan net.Conn
+	m map[string]chan *logicalConnection
 }
 
 // Load returns the value stored in the map for a key
 // if it does not exist then make it
-func (n *ReceiverChanMap) load(port int, ChainCoord common.Coordinate) chan net.Conn {
+func (n *ReceiverChanMap) load(port int, ChainCoord common.Coordinate) chan *logicalConnection {
 	n.l.Lock()
 	defer n.l.Unlock()
 
@@ -226,9 +184,9 @@ func (n *ReceiverChanMap) load(port int, ChainCoord common.Coordinate) chan net.
 
 	v, has := n.m[key]
 	if !has {
-		ch := make(chan net.Conn, 128)
+		ch := make(chan *logicalConnection, 128)
 		if 0 == len(n.m) {
-			n.m = map[string]chan net.Conn{
+			n.m = map[string]chan *logicalConnection{
 				key: ch,
 			}
 		} else {
@@ -242,4 +200,56 @@ func (n *ReceiverChanMap) load(port int, ChainCoord common.Coordinate) chan net.
 		return v
 	}
 	return nil
+}
+
+// TimerMap stores time limited data
+type TimerMap struct {
+	interval int64
+	size     int64
+	data     map[int64]map[interface{}]interface{}
+}
+
+// NewTimerMap is creator of timerMap
+func NewTimerMap(interval time.Duration, size int64) *TimerMap {
+	return &TimerMap{
+		interval: int64(interval),
+		size:     size,
+		data:     map[int64]map[interface{}]interface{}{},
+	}
+}
+
+// Store sets the value for a key.
+func (tm *TimerMap) Store(key interface{}, value interface{}) {
+	pos := time.Now().UnixNano() / tm.interval
+
+	m, has := tm.data[pos]
+	if !has {
+		m = map[interface{}]interface{}{}
+		tm.data[pos] = m
+	}
+	m[key] = value
+}
+
+// Load returns the value stored in the map for a key, or nil if no
+// value is present.
+// The ok result indicates whether value was found in the map.
+func (tm *TimerMap) Load(key interface{}) (interface{}, bool) {
+	deleteKeyList := []int64{}
+	endLine := (time.Now().UnixNano() / tm.interval) - tm.size
+	for k, v := range tm.data {
+		if endLine > k {
+			deleteKeyList = append(deleteKeyList, k)
+			continue
+		}
+
+		if value, has := v[key]; has {
+			return value, true
+		}
+	}
+
+	for _, key := range deleteKeyList {
+		delete(tm.data, key)
+	}
+
+	return nil, false
 }

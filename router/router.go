@@ -8,132 +8,154 @@ import (
 	"time"
 
 	"git.fleta.io/fleta/common"
-	"git.fleta.io/fleta/framework/log"
-
 	network "git.fleta.io/fleta/mocknet"
+	"github.com/dgraph-io/badger"
+
+	"git.fleta.io/fleta/framework/log"
 )
 
-//RemoteAddr remote address type
-type RemoteAddr string
-
-const mockMode = true
+// Config is router config
+type Config struct {
+	Network      string
+	Port         int
+	StorePath    string
+	BanEvilScore int
+}
 
 //Router that converts external connections to logical connections.
 type Router interface {
 	AddListen(ChainCoord *common.Coordinate) error
 	Request(addrStr string, ChainCoord *common.Coordinate) error
-	Accept(ChainCoord *common.Coordinate) (net.Conn, error)
-	Port() uint16
-	ConnList() []string
+	Accept(ChainCoord *common.Coordinate) (net.Conn, time.Duration, error)
 	Localhost() string
+	GetEvilScore(addr string) (addEvilScore uint16, err error)
+	UpdateEvilScore(addr string, addEvilScore uint16) error
 }
 
 type router struct {
+	Config        *Config
+	localhost     string
 	ListenersLock sync.Mutex
 	Listeners     ListenerMap
-	pConn         PConnMap
+	PConnLock     sync.Mutex
+	PConn         map[string]*physicalConnection
+	PList         *PConnList
 	ReceiverChan  ReceiverChanMap
-	port          uint16
-	network       string
-	localhost     string
 }
 
-// NewRouter is the router creator.
-func NewRouter(Network string, port uint16) Router {
-	r := &router{
-		Listeners:    ListenerMap{},
-		pConn:        PConnMap{},
-		ReceiverChan: ReceiverChanMap{},
-		port:         port,
-		network:      Network,
+// NewRouter is creator of router
+func NewRouter(Config *Config) (Router, error) {
+	pl, err := NewPConnList(Config.StorePath)
+	if err != nil {
+		return nil, err
 	}
-	return r
-}
-
-//Localhost returns the local host itself
-func (r *router) Localhost() string {
-	return r.localhost
-}
-
-//ConnList returns the associated node addresses.
-func (r *router) ConnList() []string {
-	list := []string{}
-	r.pConn.Range(func(addr RemoteAddr, pc *physicalConnection) bool {
-		list = append(list, string(addr)+","+strconv.Itoa(pc.lConn.len()))
-		return true
-	})
-	return list
-}
-
-//Port returns the port to connect to node
-func (r *router) Port() uint16 {
-	return r.port
+	return &router{
+		Config:       Config,
+		Listeners:    ListenerMap{},
+		PConn:        map[string]*physicalConnection{},
+		PList:        pl,
+		ReceiverChan: ReceiverChanMap{},
+	}, nil
 }
 
 //AddListen registers a logical connection as a waiting-for-connect condition.
 func (r *router) AddListen(ChainCoord *common.Coordinate) error {
-	listenAddr := ":" + strconv.Itoa(int(r.port))
+	listenAddr := ":" + strconv.Itoa(r.Config.Port)
 	r.ListenersLock.Lock()
-	l, has := r.Listeners.Load(RemoteAddr(listenAddr))
+	_, has := r.Listeners.Load(listenAddr)
+	var listen net.Listener
 	if !has {
-		l2, err := network.Listen(r.network, listenAddr)
+		l, err := network.Listen(r.Config.Network, listenAddr)
 		if err != nil {
 			return err
 		}
-		log.Debug("Listen ", listenAddr, " ", l2.Addr().String())
-		r.Listeners.Store(RemoteAddr(listenAddr), ChainCoord, l2)
-		go r.run(l2)
-
-		l, _ = r.Listeners.Load(RemoteAddr(listenAddr))
-		localhost := l.l.Addr().String()
+		listen = l
+		localhost := l.Addr().String()
 		if r.localhost == "" {
-			if !strings.HasPrefix(localhost, ":") {
+			if !strings.HasPrefix(localhost, ":") && !strings.HasPrefix(localhost, "[") {
 				r.localhost = localhost
 			}
 		}
+
+		log.Debug("Listen ", listenAddr, " ", l.Addr().String())
+
+		go r.listening(l)
 	}
+	r.Listeners.Store(listenAddr, ChainCoord, listen)
 	r.ListenersLock.Unlock()
 	return nil
 }
 
-func (r *router) PauseListener(ChainCoord *common.Coordinate) {
-	listenAddr := ":" + strconv.Itoa(int(r.port))
-	r.Listeners.UpdateState(RemoteAddr(listenAddr), ChainCoord, pause)
+//Request requests the connection by entering the address when a logical connection is required.
+//The chain coordinates support the connection between subchains.
+func (r *router) Request(addr string, ChainCoord *common.Coordinate) error {
+	if r.localhost != "" && strings.HasPrefix(addr, r.localhost) {
+		return ErrCannotRequestToLocal
+	}
+
+	if pi, err := r.PList.Get(addr); err != nil {
+		if err != badger.ErrKeyNotFound {
+			return err
+		}
+	} else {
+		if pi.EvilScore > uint16(r.Config.BanEvilScore) {
+			return ErrDoNotRequestToEvelNode
+		}
+	}
+
+	addr, _ = removePort(addr)
+	addr = addr + ":" + strconv.Itoa(r.Config.Port)
+	r.PConnLock.Lock()
+	pConn, has := r.PConn[addr]
+	if !has {
+		conn, err := network.Dial(r.Config.Network, addr)
+		if err != nil {
+			return err
+		}
+		pConn = r.incommingConn(conn)
+	}
+	r.PConnLock.Unlock()
+	pConn.handshake(ChainCoord)
+
+	// conn, err := mocknet.Dial(r.Config.Network, addr)
+	return nil
 }
 
-func (r *router) PlayListener(ChainCoord *common.Coordinate) {
-	listenAddr := ":" + strconv.Itoa(int(r.port))
-	r.Listeners.UpdateState(RemoteAddr(listenAddr), ChainCoord, listening)
+// Accept returns a logical connection when an external connection request is received.
+func (r *router) Accept(ChainCoord *common.Coordinate) (net.Conn, time.Duration, error) {
+	ch := r.ReceiverChan.load(r.Config.Port, *ChainCoord)
+
+	receiver := <-ch
+	var c net.Conn
+	c = receiver
+	log.Info("Accept ", c.LocalAddr().String(), c.RemoteAddr().String())
+	return c, receiver.ping, nil
 }
 
-func (r *router) run(l net.Listener) {
+func (r *router) Localhost() string {
+	return r.localhost
+}
+
+func (r *router) SetLocalhost(l string) {
+	addr, _ := removePort(l)
+	r.localhost = addr
+}
+
+func (r *router) listening(l net.Listener) {
 	for {
-		listenAddr := ":" + strconv.Itoa(int(r.port))
+		listenAddr := ":" + strconv.Itoa(r.Config.Port)
 		r.ListenersLock.Lock()
-		ls, has := r.Listeners.Load(RemoteAddr(listenAddr))
+		ls, has := r.Listeners.Load(listenAddr)
 		r.ListenersLock.Unlock()
 		if has && ls.State() == listening {
 			conn, err := l.Accept()
-			// log.Debug("Router Run Accept " + conn.LocalAddr().String() + " : " + conn.RemoteAddr().String())
 			if err != nil {
 				log.Error("router run err : ", err)
 				continue
 			}
-			if r.localhost == "" {
-				r.SetLocalhost(conn.LocalAddr().String())
-			}
-
-			addr := RemoteAddr(conn.RemoteAddr().String())
-			_, has := r.pConn.load(addr)
-			if has {
-				log.Debug("router conn close ", r.localhost, " ", conn.RemoteAddr().String())
-				conn.Close()
-			} else {
-				log.Debug("router run ", r.localhost, " ", conn.RemoteAddr().String())
-				pc := newPhysicalConnection(addr, r.Localhost(), conn, r)
-				r.pConn.store(addr, pc)
-				go pc.run()
-			}
+			r.PConnLock.Lock()
+			r.incommingConn(conn)
+			r.PConnLock.Unlock()
 		} else if has {
 			time.Sleep(time.Second * 1)
 		} else {
@@ -142,71 +164,81 @@ func (r *router) run(l net.Listener) {
 	}
 }
 
-//Accept returns a logical connection when an external connection request is received.
-func (r *router) Accept(ChainCoord *common.Coordinate) (net.Conn, error) {
-	ch := r.ReceiverChan.load(int(r.Port()), *ChainCoord)
-
-	receiver := <-ch
-	return receiver, nil
+// GetEvilScore is get evel score
+func (r *router) GetEvilScore(addr string) (addEvilScore uint16, err error) {
+	pi, err := r.PList.Get(addr)
+	if err != nil {
+		return 0, err
+	}
+	return pi.EvilScore, nil
 }
 
-//Request requests the connection by entering the address when a logical connection is required.
-//The chain coordinates support the connection between subchains.
-func (r *router) Request(addrStr string, ChainCoord *common.Coordinate) error {
-	if r.localhost != "" && strings.HasPrefix(addrStr, r.localhost) {
-		return nil
+// UpdateEvilScore is add evel score
+func (r *router) UpdateEvilScore(addr string, addEvilScore uint16) error {
+	pi, err := r.PList.Get(addr)
+	if err != nil {
+		return err
 	}
 
-	splitPort := strings.Split(addrStr, ":")
-	if len(splitPort) > 1 {
-		lastOne := splitPort[len(splitPort)-1]
-		if _, err := strconv.Atoi(lastOne); err == nil {
-			addrStr = strings.Join(splitPort[:len(splitPort)-1], ":") + ":" + strconv.Itoa(int(r.Port()))
+	pi.EvilScore += addEvilScore
+	return r.PList.Store(pi)
+}
+
+func (r *router) incommingConn(conn net.Conn) *physicalConnection {
+	if r.localhost == "" {
+		r.SetLocalhost(conn.LocalAddr().String())
+	}
+
+	addr := conn.RemoteAddr().String()
+	pi, err := r.PList.Get(addr)
+	if err != nil {
+		if err == badger.ErrKeyNotFound {
+			pi = PhysicalConnectionInfo{
+				Addr:      addr,
+				EvilScore: 0,
+			}
+			r.PList.Store(pi)
 		}
 	}
 
-	addr := RemoteAddr(addrStr)
-	pConn, has := r.pConn.load(addr)
-	if !has {
-		conn, err := network.Dial(r.network, addrStr)
-		if err != nil {
-			return err
-		}
-		log.Debug("Dial1 ", r.localhost, " ", addrStr)
-
-		if r.localhost == "" {
-			r.SetLocalhost(conn.LocalAddr().String())
-		}
-
-		pConn = newPhysicalConnection(addr, r.localhost, conn, r)
-		r.pConn.store(addr, pConn)
-		go pConn.run()
+	_, has := r.PConn[addr]
+	var pc *physicalConnection
+	if has {
+		log.Debug("router duplicate conn close ", r.Localhost, " ", conn.RemoteAddr().String())
+		conn.Close()
 	} else {
-		log.Debug("Dial2 ", r.localhost, " ", addrStr)
+		log.Debug("router run ", r.Localhost, " ", conn.RemoteAddr().String())
+		pc = newPhysicalConnection(addr, pi, conn, r)
+		r.PConn[addr] = pc
+		go pc.run()
 	}
-
-	pConn.handshake(ChainCoord)
-
-	return nil
+	return pc
 }
 
-func (r *router) SetLocalhost(l string) {
-	ls := strings.Split(l, ":")
-	if len(ls) > 1 {
-		l = strings.Join(ls[0:len(ls)-1], ":")
-	}
-	r.localhost = l
-
-}
-
-func (r *router) acceptConn(conn net.Conn, ChainCoord *common.Coordinate) error {
-	ch := r.ReceiverChan.load(int(r.Port()), *ChainCoord)
+func (r *router) acceptConn(conn *logicalConnection, ChainCoord *common.Coordinate) error {
+	ch := r.ReceiverChan.load(r.Config.Port, *ChainCoord)
 	ch <- conn
 
 	return nil
 }
 
 func (r *router) removePhysicalConnenction(pc *physicalConnection) error {
-	r.pConn.delete(pc.addr)
+	r.PConnLock.Lock()
+	defer r.PConnLock.Unlock()
+
+	delete(r.PConn, pc.Info.Addr)
 	return pc.Close()
+}
+
+func removePort(addr string) (string, error) {
+	splitPort := strings.Split(addr, ":")
+	if len(splitPort) > 1 {
+		lastOne := splitPort[len(splitPort)-1]
+		if _, err := strconv.Atoi(lastOne); err == nil {
+			addr = strings.Join(splitPort[:len(splitPort)-1], ":")
+			return addr, nil
+		}
+		return addr, ErrNotFoundPort
+	}
+	return addr, ErrNotFoundPort
 }
