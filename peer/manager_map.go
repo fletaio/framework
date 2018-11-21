@@ -151,7 +151,7 @@ func (n *nodeStore) unsafeStore(key string, value peermessage.ConnectInfo) {
 			v.PingScoreBoard = value.PingScoreBoard
 		} else {
 			n.a = append(n.a, value)
-			n.m[key] = &n.a[len(n.a)-1]
+			n.m[key] = &value
 		}
 	}
 	n.db.Update(func(txn *badger.Txn) error {

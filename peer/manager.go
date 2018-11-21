@@ -49,7 +49,6 @@ type manager struct {
 	mm         *message.Manager
 	onReady    func(p *peer)
 
-	// nodes           NodeStore
 	nodes           *nodeStore
 	nodeRotateIndex int
 	candidates      candidateMap
@@ -66,11 +65,9 @@ type manager struct {
 type candidateState int
 
 const (
-	csDelete       candidateState = 0
-	csRequestWait  candidateState = 1
-	csRequestWait2 candidateState = 2
-	csPongWait     candidateState = 4
-	csPeerListWait candidateState = 5
+	csRequestWait           candidateState = 1
+	csPunishableRequestWait candidateState = 2
+	csPeerListWait          candidateState = 3
 )
 
 //NewManager is the peerManager creator.
@@ -137,7 +134,7 @@ func (pm *manager) StartManage() {
 func (pm *manager) EnforceConnect() {
 	dialList := []string{}
 	pm.candidates.rangeMap(func(addr string, cs candidateState) bool {
-		if cs == csRequestWait || cs == csRequestWait2 {
+		if cs == csRequestWait || cs == csPunishableRequestWait {
 			dialList = append(dialList, addr)
 		}
 		return true
@@ -165,9 +162,11 @@ func (pm *manager) AddNode(addr string) error {
 	}
 	if evilScore < pm.Config.BanEvilScore {
 		pm.candidates.store(addr, csRequestWait)
-		pm.doManageCandidate(addr, csRequestWait)
+		go pm.doManageCandidate(addr, csRequestWait)
+		log.Debug("AddNode ", pm.router.Localhost(), addr)
+	} else {
+		return router.ErrCanNotConnectToEvilNode
 	}
-	log.Debug("AddNode ", pm.router.Localhost(), addr)
 	// if err := pm.router.Request(addr, pm.ChainCoord); err != nil {
 	// 	log.Error("StartManage connect seednode ", err)
 	// 	return err
@@ -306,53 +305,42 @@ func (pm *manager) updateScoreBoard(p Peer, ci peermessage.ConnectInfo) {
 	node.PingScoreBoard.Store(ci.Address, ci.PingTime, p.LocalAddr().String()+" "+p.RemoteAddr().String()+" ")
 }
 
-func (pm *manager) doManageCandidate(addr string, cs candidateState) candidateState {
+func (pm *manager) doManageCandidate(addr string, cs candidateState) error {
 	if strings.HasPrefix(addr, pm.router.Localhost()) {
-		return csDelete
+		go pm.candidates.delete(addr)
 	}
+	var err error
 	switch cs {
 	case csRequestWait:
-		err := pm.router.Request(addr, pm.ChainCoord)
+		err = pm.router.Request(addr, pm.ChainCoord)
+		go pm.candidates.store(addr, csPunishableRequestWait)
 		if err != nil {
-			log.Error("PeerListHandler err ", err)
+			log.Error("RequestWait err ", err)
 		}
-		return csRequestWait2
-	case csRequestWait2:
-		pm.router.UpdateEvilScore(addr, 40)
-		err := pm.router.Request(addr, pm.ChainCoord)
+	case csPunishableRequestWait:
+		err = pm.router.Request(addr, pm.ChainCoord)
 		if err != nil {
-			log.Error("PeerListHandler err ", err)
+			pm.router.UpdateEvilScore(addr, 40)
+			log.Error("RequestWait2 err ", err)
 		}
 	case csPeerListWait:
 		if p, has := pm.connections.Load(addr); has {
 			peermessage.SendRequestPeerList(p, p.LocalAddr().String())
 		} else {
-			return csRequestWait
+			go pm.candidates.store(addr, csRequestWait)
 		}
 	}
-	return cs
+	return err
 }
 
 func (pm *manager) manageCandidate() {
 	for {
 		time.Sleep(time.Second * 30)
-		modifylist := map[string]candidateState{}
 		pm.candidates.rangeMap(func(addr string, cs candidateState) bool {
-			changedCs := pm.doManageCandidate(addr, cs)
-			if changedCs != cs {
-				modifylist[addr] = changedCs
-			}
+			pm.doManageCandidate(addr, cs)
 			time.Sleep(time.Millisecond * 50)
 			return true
 		})
-		for k, s := range modifylist {
-			switch s {
-			case csDelete:
-				pm.candidates.delete(k)
-			default:
-				pm.candidates.store(k, s)
-			}
-		}
 	}
 }
 
@@ -439,7 +427,8 @@ func (pm *manager) addPeer(p Peer) {
 	} else {
 		addr := p.RemoteAddr().String()
 		pm.connections.Store(addr, p)
-		pm.candidates.store(addr, csPongWait)
+		pm.nodes.Store(addr, peermessage.NewConnectInfo(addr, p.PingTime()))
+		pm.candidates.store(addr, csPeerListWait)
 
 		pm.eventHandlerLock.Lock()
 		for _, eh := range pm.eventHandler {
@@ -448,10 +437,7 @@ func (pm *manager) addPeer(p Peer) {
 		pm.eventHandlerLock.Unlock()
 
 		go func(p Peer) {
-			for p.PingTime() == -1 && p.IsClose() == false {
-				peermessage.SendRequestPeerList(p, p.LocalAddr().String())
-				time.Sleep(time.Second * 3)
-			}
+			peermessage.SendRequestPeerList(p, p.LocalAddr().String())
 		}(p)
 	}
 }

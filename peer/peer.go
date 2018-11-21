@@ -2,6 +2,7 @@ package peer
 
 import (
 	"bytes"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -66,7 +67,9 @@ func (p *peer) readPacket() {
 		BNum := make([]byte, 8)
 		n, err := p.Read(BNum)
 		if err != nil {
-			log.Error("recv read type error : ", err)
+			if err != io.EOF {
+				log.Error("recv read type error : ", err)
+			}
 			return
 		}
 		if n != 8 {
