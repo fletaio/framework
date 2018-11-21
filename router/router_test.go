@@ -202,10 +202,8 @@ func Test_router_Connecte_send(t *testing.T) {
 			}()
 			wg.Wait()
 
-			wg.Add(1)
 			strChan := make(chan string)
 			go func() {
-				wg.Wait()
 				bs := make([]byte, 1024)
 				n, _ := readConn.Read(bs)
 				strChan <- string(bs[:n])
@@ -213,7 +211,6 @@ func Test_router_Connecte_send(t *testing.T) {
 
 			go func() {
 				writeConn.Write([]byte("sendTest"))
-				wg.Done()
 			}()
 
 			result := <-strChan

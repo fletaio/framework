@@ -109,17 +109,18 @@ func (pc *physicalConnection) run() error {
 						if inow, has := pc.handshakeTimeMap.Load(uuid.String()); has {
 							if now, ok := inow.(time.Time); ok {
 								pc.pingTime = time.Now().Sub(now)
+								if conn, new := pc.makeLogicalConnenction(ChainCoord, pc.pingTime); new == true {
+									err := pc.r.acceptConn(conn, ChainCoord)
+									if err != nil {
+										log.Error("physicalConnection run acceptConn err : ", err)
+									}
+								}
 							}
 						} else {
 							log.Error("no time map ", uuid.String())
+							pc.handshake(ChainCoord)
 						}
 
-						if conn, new := pc.makeLogicalConnenction(ChainCoord, pc.pingTime); new == true {
-							err := pc.r.acceptConn(conn, ChainCoord)
-							if err != nil {
-								log.Error("physicalConnection run acceptConn err : ", err)
-							}
-						}
 					}
 
 				}

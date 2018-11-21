@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"git.fleta.io/fleta/framework/log"
+
 	"git.fleta.io/fleta/common"
 )
 
@@ -103,6 +105,55 @@ func (n *ListenerMap) UpdateState(key string, chain *common.Coordinate, state Li
 // 		}
 // 	}
 // }
+
+//PConnMap is a structure that manages logical connections.
+type PConnMap struct {
+	name string
+	l    sync.Mutex
+	m    map[string]*physicalConnection
+}
+
+func (n *PConnMap) lock(name string) {
+	if n.name != "" {
+		nm := n.name
+		log.Debug("PConnMap lock by ", nm, " and wait ", name)
+		n.l.Lock()
+		log.Debug("PConnMap unlock by ", nm, " enter ", name)
+	} else {
+		n.l.Lock()
+	}
+	n.name = name
+}
+
+func (n *PConnMap) unlock() {
+	n.name = ""
+	n.l.Unlock()
+}
+
+// Load returns the value stored in the map for a key, or nil if no
+// value is present.
+// The ok result indicates whether value was found in the map.
+func (n *PConnMap) load(key string) (*physicalConnection, bool) {
+	v, has := n.m[key]
+	return v, has
+}
+
+// Store sets the value for a key.
+func (n *PConnMap) store(key string, value *physicalConnection) {
+	if 0 == len(n.m) {
+		n.m = map[string]*physicalConnection{
+			key: value,
+		}
+	} else {
+		n.m[key] = value
+	}
+
+}
+
+// Delete deletes the value for a key.
+func (n *PConnMap) delete(key string) {
+	delete(n.m, key)
+}
 
 //LConnMap is a structure that manages logical connections.
 type LConnMap struct {

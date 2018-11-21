@@ -37,8 +37,7 @@ type router struct {
 	localhost     string
 	ListenersLock sync.Mutex
 	Listeners     ListenerMap
-	PConnLock     sync.Mutex
-	PConn         map[string]*physicalConnection
+	PConn         PConnMap
 	PList         *PConnList
 	ReceiverChan  ReceiverChanMap
 }
@@ -52,7 +51,7 @@ func NewRouter(Config *Config) (Router, error) {
 	return &router{
 		Config:       Config,
 		Listeners:    ListenerMap{},
-		PConn:        map[string]*physicalConnection{},
+		PConn:        PConnMap{},
 		PList:        pl,
 		ReceiverChan: ReceiverChanMap{},
 	}, nil
@@ -103,8 +102,10 @@ func (r *router) Request(addr string, ChainCoord *common.Coordinate) error {
 
 	addr, _ = removePort(addr)
 	addr = addr + ":" + strconv.Itoa(r.Config.Port)
-	r.PConnLock.Lock()
-	pConn, has := r.PConn[addr]
+	r.PConn.lock("Request")
+	defer r.PConn.unlock()
+
+	pConn, has := r.PConn.load(addr)
 	if !has {
 		conn, err := network.Dial(r.Config.Network, addr)
 		if err != nil {
@@ -118,7 +119,6 @@ func (r *router) Request(addr string, ChainCoord *common.Coordinate) error {
 			return err
 		}
 	}
-	r.PConnLock.Unlock()
 	pConn.handshake(ChainCoord)
 
 	// conn, err := mocknet.Dial(r.Config.Network, addr)
@@ -157,14 +157,14 @@ func (r *router) listening(l net.Listener) {
 				log.Error("router run err : ", err)
 				continue
 			}
-			r.PConnLock.Lock()
+			r.PConn.lock("listening")
 			_, err = r.incommingConn(conn)
 			if err != nil {
 				if err == ErrCanNotConnectToEvilNode {
 					conn.Close()
 				}
 			}
-			r.PConnLock.Unlock()
+			r.PConn.unlock()
 		} else if has {
 			time.Sleep(time.Second * 1)
 		} else {
@@ -216,7 +216,7 @@ func (r *router) incommingConn(conn net.Conn) (*physicalConnection, error) {
 		return nil, ErrCanNotConnectToEvilNode
 	}
 
-	_, has := r.PConn[addr]
+	_, has := r.PConn.load(addr)
 	var pc *physicalConnection
 	if has {
 		log.Debug("router duplicate conn close ", r.Localhost, " ", conn.RemoteAddr().String())
@@ -224,7 +224,7 @@ func (r *router) incommingConn(conn net.Conn) (*physicalConnection, error) {
 	} else {
 		log.Debug("router run ", r.Localhost, " ", conn.RemoteAddr().String())
 		pc = newPhysicalConnection(addr, conn, r)
-		r.PConn[addr] = pc
+		r.PConn.store(addr, pc)
 		go pc.run()
 	}
 	return pc, nil
@@ -238,10 +238,10 @@ func (r *router) acceptConn(conn *logicalConnection, ChainCoord *common.Coordina
 }
 
 func (r *router) removePhysicalConnenction(pc *physicalConnection) error {
-	r.PConnLock.Lock()
-	defer r.PConnLock.Unlock()
+	r.PConn.lock("removePhysicalConnenction")
+	defer r.PConn.unlock()
 
-	delete(r.PConn, pc.RemoteAddr().String())
+	r.PConn.delete(pc.RemoteAddr().String())
 	return pc.Close()
 }
 
