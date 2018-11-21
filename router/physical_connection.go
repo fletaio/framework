@@ -338,6 +338,8 @@ func (pc *physicalConnection) makeLogicalConnenction(ChainCoord *common.Coordina
 
 		go func(closeChan chan bool, ChainCoord *common.Coordinate) {
 			<-closeChan
+			pc.lConn.lock()
+			defer pc.lConn.unlock()
 			pc.lConn.delete(*ChainCoord)
 		}(closeChan, ChainCoord)
 	}
@@ -364,6 +366,8 @@ func (pc *physicalConnection) handshakeResponse(ChainCoord *common.Coordinate, b
 		return wrote, ErrNotConnected
 	}
 
+	pc.lConn.lock()
+	defer pc.lConn.unlock()
 	_, has := pc.lConn.load(*ChainCoord)
 
 	body = append([]byte{FORONE}, body...)
@@ -383,6 +387,8 @@ func (pc *physicalConnection) handshake(ChainCoord *common.Coordinate) (wrote in
 		return wrote, ErrNotConnected
 	}
 
+	pc.lConn.lock()
+	defer pc.lConn.unlock()
 	_, has := pc.lConn.load(*ChainCoord)
 
 	if !has {
