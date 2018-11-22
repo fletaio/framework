@@ -32,6 +32,7 @@ var testMessageType message.Type
 
 func init() {
 	testMessageType = message.DefineType("testMessage")
+	os.RemoveAll("./test/")
 }
 
 func (p *testMessage) Type() message.Type {
@@ -43,9 +44,8 @@ func Test_manager_BroadCast(t *testing.T) {
 	defer testLock.Unlock()
 	ID := int(atomic.AddInt32(&testID, 1))
 	size := 20
-	path := "./test/Test" + strconv.Itoa(ID)
+	path := "./test/Test_manager_BroadCast" + strconv.Itoa(ID)
 	port := testPort + ID
-	os.RemoveAll(path)
 
 	type args struct {
 		ChainCoord          *common.Coordinate
@@ -179,9 +179,8 @@ func Test_manager_ExceptCast(t *testing.T) {
 	defer testLock.Unlock()
 	ID := int(atomic.AddInt32(&testID, 1))
 	size := 20
-	path := "./test/Test" + strconv.Itoa(ID)
+	path := "./test/Test_manager_ExceptCast" + strconv.Itoa(ID)
 	port := testPort + ID
-	os.RemoveAll(path)
 
 	type args struct {
 		ChainCoord          *common.Coordinate
@@ -322,9 +321,8 @@ func TestNewManager(t *testing.T) {
 	defer testLock.Unlock()
 	ID := int(atomic.AddInt32(&testID, 1))
 	addr := "test" + strconv.Itoa(ID)
-	path := "./test/Test" + strconv.Itoa(ID)
+	path := "./test/TestNewManager" + strconv.Itoa(ID)
 	port := testPort + ID
-	os.RemoveAll(path)
 
 	type args struct {
 		ChainCoord   *common.Coordinate
@@ -374,9 +372,8 @@ func TestAddNode(t *testing.T) {
 	ID2 := int(atomic.AddInt32(&testID, 1))
 	addr1 := "test" + strconv.Itoa(ID1)
 	addr2 := "test" + strconv.Itoa(ID2)
-	path := "./test/Test" + strconv.Itoa(ID1)
+	path := "./test/TestAddNode" + strconv.Itoa(ID1)
 	port := testPort + ID1
-	os.RemoveAll(path)
 
 	type args struct {
 		ChainCoord    *common.Coordinate
@@ -464,9 +461,8 @@ func TestBanEvil(t *testing.T) {
 	defer testLock.Unlock()
 	ID := int(atomic.AddInt32(&testID, 1))
 	addr := "test" + strconv.Itoa(ID)
-	path := "./test/Test" + strconv.Itoa(ID)
+	path := "./test/TestBanEvil" + strconv.Itoa(ID)
 	port := testPort + ID
-	os.RemoveAll(path)
 
 	type args struct {
 		ChainCoord    *common.Coordinate
@@ -535,9 +531,8 @@ func TestPeerListSpread(t *testing.T) {
 	defer testLock.Unlock()
 	ID := int(atomic.AddInt32(&testID, 1))
 	size := 20
-	path := "./test/Test" + strconv.Itoa(ID)
+	path := "./test/TestPeerListSpread" + strconv.Itoa(ID)
 	port := testPort + ID
-	os.RemoveAll(path)
 
 	type args struct {
 		ChainCoord          *common.Coordinate
@@ -607,13 +602,23 @@ func TestPeerListSpread(t *testing.T) {
 				pms = append(pms, Pm)
 			}
 
+			log.Info("wait NodeList fill")
+
 			for len(pms[len(pms)-1].NodeList()) < size-1 {
 				time.Sleep(time.Second)
+				for _, pm := range pms {
+					pm.candidates.rangeMap(func(addr string, cs candidateState) bool {
+						pm.doManageCandidate(addr, cs)
+						time.Sleep(time.Millisecond * 50)
+						return true
+					})
+				}
+
 			}
 
 			log.Info("NodeList fill done")
 
-			for len(pms[len(pms)-1].GroupList()) < 6 {
+			for len(pms[len(pms)-1].GroupList()) < 2 {
 				time.Sleep(time.Second)
 			}
 
@@ -630,9 +635,8 @@ func Test_manager_EnforceConnect(t *testing.T) {
 	ID2 := int(atomic.AddInt32(&testID, 1))
 	addr1 := "test" + strconv.Itoa(ID1)
 	addr2 := "test" + strconv.Itoa(ID2)
-	path := "./test/Test" + strconv.Itoa(ID1)
+	path := "./test/Test_manager_EnforceConnect" + strconv.Itoa(ID1)
 	port := testPort + ID1
-	os.RemoveAll(path)
 
 	type args struct {
 		ChainCoord    *common.Coordinate
@@ -712,6 +716,174 @@ func Test_manager_EnforceConnect(t *testing.T) {
 				t.Errorf("NewManager() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
+		})
+	}
+}
+
+func Test_multi_chain_send(t *testing.T) {
+	testLock.Lock()
+	defer testLock.Unlock()
+	ID1 := int(atomic.AddInt32(&testID, 1))
+	ID2 := int(atomic.AddInt32(&testID, 1))
+	addr1 := "test" + strconv.Itoa(ID1)
+	addr2 := "test" + strconv.Itoa(ID2)
+	path := "./test/Test_multi_chain_send" + strconv.Itoa(ID1)
+	port := testPort + ID1
+
+	type args struct {
+		ChainCoord1   *common.Coordinate
+		ChainCoord2   *common.Coordinate
+		routerConfig1 *router.Config
+		routerConfig2 *router.Config
+		Config1_1     *Config
+		Config1_2     *Config
+		Config2_1     *Config
+		Config2_2     *Config
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    bool
+		wantErr bool
+	}{
+		{
+			name: "string",
+			args: args{
+				ChainCoord1: common.NewCoordinate(0, 1),
+				ChainCoord2: common.NewCoordinate(0, 2),
+				routerConfig1: &router.Config{
+					Network:   "mock:" + addr1,
+					Port:      port,
+					StorePath: path + "/router1/",
+				},
+				Config1_1: &Config{
+					BanEvilScore: 100,
+					StorePath:    path + "/peer1_1/",
+				},
+				Config1_2: &Config{
+					BanEvilScore: 100,
+					StorePath:    path + "/peer1_2/",
+				},
+				routerConfig2: &router.Config{
+					Network:   "mock:" + addr2,
+					Port:      port,
+					StorePath: path + "/router2/",
+				},
+				Config2_1: &Config{
+					BanEvilScore: 100,
+					StorePath:    path + "/peer2_1/",
+				},
+				Config2_2: &Config{
+					BanEvilScore: 100,
+					StorePath:    path + "/peer2_2/",
+				},
+			},
+			want:    true,
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+
+		t.Run(tt.name, func(t *testing.T) {
+			addr1 = addr1 + ":" + strconv.Itoa(port)
+			addr2 = addr2 + ":" + strconv.Itoa(port)
+
+			wg := sync.WaitGroup{}
+			wg.Add(4)
+
+			creator := func(r router.Router, ChainCoord *common.Coordinate, config *Config) (*testMessage, error) {
+				mm := message.NewManager()
+				pm, err := NewManager(ChainCoord, r, mm, config)
+				if err != nil {
+					return nil, err
+				}
+
+				pm.RegisterEventHandler(&BaseEventHandler{})
+
+				tm := &testMessage{
+					pm: pm.(*manager),
+				}
+				tm.List = map[string]peermessage.ConnectInfo{}
+				func(tm *testMessage) {
+					mm.ApplyMessage(testMessageType, func(r io.Reader) message.Message {
+						tm := &testMessage{}
+						tm.ReadFrom(r)
+						return tm
+					}, func(m message.Message) error {
+						if t, ok := m.(*testMessage); ok {
+							if len(tm.List) == 0 {
+								tm.From = t.From
+								tm.List[strconv.Itoa(len(tm.List))] = peermessage.ConnectInfo{
+									Address: t.From,
+								}
+								tm.pm.BroadCast(tm)
+								wg.Done()
+							}
+
+							return nil
+						}
+						return errors.New("is not test message")
+					})
+				}(tm)
+
+				pm.AddNode(addr1)
+				pm.StartManage()
+
+				return tm, nil
+			}
+
+			r1, err := router.NewRouter(tt.args.routerConfig1)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NewManager() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			tmR1C1, err := creator(r1, tt.args.ChainCoord1, tt.args.Config1_1)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NewManager() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			tmR1C2, err := creator(r1, tt.args.ChainCoord2, tt.args.Config1_2)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NewManager() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			r2, err := router.NewRouter(tt.args.routerConfig2)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NewManager() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			tmR2C1, err := creator(r2, tt.args.ChainCoord1, tt.args.Config2_1)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NewManager() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			tmR2C2, err := creator(r2, tt.args.ChainCoord2, tt.args.Config2_2)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NewManager() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			time.Sleep(time.Second)
+
+			tmR2C1.From = "ChainCoord1 send"
+			tmR2C1.pm.BroadCast(tmR2C1)
+
+			tmR2C2.From = "ChainCoord2 send"
+			tmR2C2.pm.BroadCast(tmR2C2)
+
+			wg.Wait()
+
+			if tmR1C1.From != tmR2C1.From {
+				t.Errorf("except tmR1C1.From is equal with tmR2C1.From but tmR1C1.From is '%v' and tmR2C1.From is '%v'", tmR1C2.From, tmR2C2.From)
+				return
+			}
+			if tmR1C2.From != tmR2C2.From {
+				t.Errorf("except tmR1C2.From is equal with tmR2C2.From but tmR1C2.From is '%v' and tmR2C2.From is '%v'", tmR1C2.From, tmR2C2.From)
+				return
+			}
+
 		})
 	}
 }
