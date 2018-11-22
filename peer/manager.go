@@ -197,19 +197,6 @@ func (pm *manager) ExceptCast(exceptAddr string, m message.Message) {
 	})
 }
 
-//ConnectedPeerList is returns the addresses of the connected peers
-func (pm *manager) ConnectedPeerList() []string {
-	list := make([]string, 0)
-	// for p := range pm.connections.Range() {
-	// 	list = append(list, p.ID())
-	// }
-	pm.connections.Range(func(key string, value Peer) bool {
-		list = append(list, key)
-		return true
-	})
-	return list
-}
-
 //NodeList is returns the addresses of the collected peers
 func (pm *manager) NodeList() []string {
 	list := make([]string, 0)

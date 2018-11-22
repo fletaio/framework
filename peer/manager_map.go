@@ -109,27 +109,6 @@ func (n *nodeStore) LoadOrStore(key string, value peermessage.ConnectInfo) peerm
 	return value
 }
 
-// Update updates the value for a key.
-func (n *nodeStore) Update(key string, update func(peermessage.ConnectInfo) peermessage.ConnectInfo) bool {
-	v, has := n.m[key]
-	if has {
-		re := update(*v)
-		v.Address = re.Address
-		v.PingTime = re.PingTime
-
-		n.db.Update(func(txn *badger.Txn) error {
-			bf := bytes.Buffer{}
-			v.WriteTo(&bf)
-			if err := txn.Set([]byte(key), bf.Bytes()); err != nil {
-				return err
-			}
-			return nil
-		})
-
-	}
-	return has
-}
-
 // Store sets the value for a key.
 func (n *nodeStore) Store(key string, value peermessage.ConnectInfo) {
 	n.l.Lock()

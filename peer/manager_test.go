@@ -316,6 +316,135 @@ func Test_manager_ExceptCast(t *testing.T) {
 	}
 }
 
+func Test_target_cast(t *testing.T) {
+	testLock.Lock()
+	defer testLock.Unlock()
+	ID := int(atomic.AddInt32(&testID, 1))
+	size := 5
+	path := "./test/Test_target_cast" + strconv.Itoa(ID)
+	port := testPort + ID
+
+	type args struct {
+		ChainCoord          *common.Coordinate
+		DefaultRouterConfig *router.Config
+		DefaultConfig       *Config
+		IDs                 []int
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    bool
+		wantErr error
+	}{
+		{
+			name: "string",
+			args: args{
+				ChainCoord: &common.Coordinate{},
+				DefaultRouterConfig: &router.Config{
+					Network:   "mock:",
+					Port:      port,
+					StorePath: path + "/router",
+				},
+				DefaultConfig: &Config{
+					BanEvilScore: 1000,
+					StorePath:    path + "/peer",
+				},
+				IDs: func() []int {
+					IDs := make([]int, 0, size)
+					for i := 0; i < size; i++ {
+						IDs = append(IDs, int(atomic.AddInt32(&testID, 1)))
+					}
+					return IDs
+				}(),
+			},
+			want:    true,
+			wantErr: router.ErrCanNotConnectToEvilNode,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+
+			wg := sync.WaitGroup{}
+			wg.Add(size - 1)
+
+			creator := func(id int) *testMessage {
+				rc := &router.Config{
+					Network:   tt.args.DefaultRouterConfig.Network + "testid" + strconv.Itoa(id),
+					Port:      tt.args.DefaultRouterConfig.Port,
+					StorePath: tt.args.DefaultRouterConfig.StorePath + strconv.Itoa(id) + "/",
+				}
+				pc := &Config{
+					BanEvilScore: tt.args.DefaultConfig.BanEvilScore,
+					StorePath:    tt.args.DefaultConfig.StorePath + strconv.Itoa(id) + "/",
+				}
+				r, _ := router.NewRouter(rc)
+				mm := message.NewManager()
+				pm, _ := NewManager(tt.args.ChainCoord, r, mm, pc)
+
+				pm.RegisterEventHandler(&BaseEventHandler{})
+
+				tm := &testMessage{
+					pm: pm.(*manager),
+				}
+				tm.List = map[string]peermessage.ConnectInfo{}
+				func(tm *testMessage) {
+					mm.ApplyMessage(testMessageType, func(r io.Reader) message.Message {
+						tm := &testMessage{}
+						tm.ReadFrom(r)
+						return tm
+					}, func(m message.Message) error {
+						if t, ok := m.(*testMessage); ok {
+							tm.From = t.From
+							wg.Done()
+							return nil
+						}
+						return errors.New("is not test message")
+					})
+				}(tm)
+
+				return tm
+			}
+
+			tms := make([]*testMessage, 0, size)
+			for _, id := range tt.args.IDs {
+				tm := creator(id)
+				tm.pm.StartManage()
+				tm.pm.AddNode("testid" + strconv.Itoa(tt.args.IDs[0]))
+				tms = append(tms, tm)
+			}
+
+			for len(tms[0].pm.ConnectedList()) < 4 {
+				time.Sleep(time.Second)
+			}
+
+			log.Info("targetCast init done")
+			for i, tm := range tms {
+				if i == 0 {
+					continue
+				}
+				targetNode := tm.pm.router.Localhost()
+				tms[0].From = "to " + targetNode
+				tms[0].pm.TargetCast(targetNode, tms[0])
+				log.Info("send target node : ", targetNode)
+			}
+
+			wg.Wait()
+
+			for i, tm := range tms {
+				if i == 0 {
+					continue
+				}
+
+				expectMsg := "to " + tm.pm.router.Localhost()
+				if expectMsg != tm.From {
+					t.Errorf("expectMsg %v but data %v", expectMsg, tm.From)
+					return
+				}
+			}
+		})
+	}
+}
+
 func TestNewManager(t *testing.T) {
 	testLock.Lock()
 	defer testLock.Unlock()
