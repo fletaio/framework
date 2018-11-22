@@ -15,6 +15,9 @@ type Manager interface {
 	AddNode(addr string) error
 	BroadCast(m message.Message)
 	NodeList() []string
+	ConnectedList() []string
+	TargetCast(addr string, m message.Message) error
+	ExceptCast(addr string, m message.Message)
 }
 
 type Peer interface {
@@ -34,20 +37,17 @@ type EventHandler interface {
 ## NewManager(ChainCoord *common.Coordinate, mh *message.Handler, cfg Config) (Manager, error)
 
 <pre><code>NewManager is the constructor of the peer manager.
-This constructor receives coordinates of chain, message handler, manager config as parameters.
+This constructor receives StorePath and BanEvilScore as parameters.
 
 Config consists of:
 
 type Config struct {
-	Port      uint16
-	Network   string
 	StorePath string
+	BanEvilScore uint16
 }
 
-The Network field can include tcp, udp and mock (custom) and enter the port number to use in the Port field.
-Network 필드에는 tcp, udp, mock(custom)이 포함될수 있고 Port 필드에는 사용할 포트 번호를 입력합니다.
-In the StorePath field, enter the path you want to save the DB file.
-StorePath 필드에는 DB파일을 저장할 위치를 입력합니다</code></pre>
+The StorePath field is the path to the DB file and the BanEvilleScore field is the base score for ban the peer.
+StorePath 필드는 DB 파일의 경로이며 BanEvilScore 필드는 피어를 ban하는 기준 점수입니다.</code></pre>
 
 ## Manager
 
@@ -60,43 +60,73 @@ RegisterEventHandler의 파라미터는 EventHandler를 구현해야 합니다.<
 
 ### StartManage()
 
-<pre><code>This function performs the functions required for peer manager to run.
-</code></pre>
+<pre><code>This function initiates the functions that peer managers need to communicate with outside and manage their peers.
+이 함수는 피어 매니저가 외부와 통신을 하고, 피어들을 관리하는데 필요한 기능들을 시작합니다.</code></pre>
 
 ### AddNode(addr string) error
-<pre><code></code></pre>
+<pre><code>This function is used to add nodes directly.
+직접적으로 Node를 추가할 때 사용하는 함수 입니다.</code></pre>
+
 ### BroadCast(m message.Message)
-<pre><code></code></pre>
+<pre><code>This function used to transfer messages to all connected nodes.
+연결되어 있는 모든 노드에 message를 전송할 때 사용하는 함수입니다.</code></pre>
+
 ### NodeList() []string
-<pre><code></code></pre>
+<pre><code>This function returns a peer list with a connected record even once.
+한번이라도 연결된 기록이 있는 peer 목록을 리턴하는 함수 입니다.
+It can be removed from the list by evil score.
+evil score에 의해 목록에서 제거될 수 있습니다.</code></pre>
 
+### ConnectedList() []string
+<pre><code>This function returns the list of currently connected peers.
+현재 연결되어 있는 peer의 목록을 리턴하는 함수 입니다.
+This returns the list of peers connected to the calling time of the function, so must check the connection before using it.
+함수의 호출시점에 연결되어 있는 peer의 목록을 리턴 하므로, 사용시에 disconnection을 확인 후에 사용해야 합니다.</code></pre>
 
+### TargetCast(addr string, m message.Message) error
+<pre><code>Send a message by specifying the target peer as a parameter.
+목표 피어를 파라미터로 지정하여 message를 전송합니다.
+Returns an ErrNotFoundPer error if not found the target peer.
+목표한 피어가 없을 경우 ErrNotFoundPeer 에러를 리턴합니다.</code></pre>
+
+### ExceptCast(addr string, m message.Message)
+<pre><code>Specify a specific peer to send a message to all connected peers except for that peer.
+특정 피어를 지정하여 해당 피어만 제외하고 연결된 모든 피어에 message를 전송합니다.</code></pre>
 
 ## Peer
 
 ### net.Conn
-<pre><code></code></pre>
+<pre><code>This is included to use the peer structure as a "net.Conn".
+Peer 구조체를 net.Conn 처럼 사용하기 위해 포함합니다.</code></pre>
+
 ### Send(m message.Message)
-<pre><code></code></pre>
+<pre><code>Send message to peer.</code></pre>
+
 ### PingTime() time.Duration
-<pre><code></code></pre>
+<pre><code>Returns the ping time of this peer.</code></pre>
+
 ### SetPingTime(t time.Duration)
-<pre><code></code></pre>
+<pre><code>Sets the ping time of this peer.</code></pre>
+
 ### ConnectedTime() int64
-<pre><code></code></pre>
+<pre><code>Returns the created time of this peer</code></pre>
+
 ### IsClose() bool
-<pre><code></code></pre>
-
-
-<pre><code></code></pre>
+<pre><code>Returns the peer close status</code></pre>
 
 ## EventHandler
+<pre><code>Interface used to perform additional tasks externally when a peer is connected and disconnected.
+외부에서 피어가 연결된 시점과 연결이 끊긴 시점에 추가적인 동작을 수행 할 수 있도록 도와주는 인터페이스 입니다.</code></pre>
 
 ### PeerConnected(p Peer)
 
-<pre><code></code></pre>
+<pre><code>Called after the connection is established and the data is ready to read and send
+연결이 수립되고 데이터를 읽을 준비를 완료한 후에 호출됩니다.</code></pre>
 
-### PeerClosed(p Peer)
+### PeerDisconnected(p Peer)
 
-<pre><code></code></pre>
+<pre><code>This function is called just before net.Conn closes.
+net.Conn이 close 되기 바로 직전에 호출됩니다.
+It can't send or receive any additional data, but it can see the instantly available data to net.Conn.
+추가적으로 데이터를 주고받을순 없지만 net.Conn에서 즉각적으로 사용할 수 있는 데이터를 열람 할 수 있습니다.</code></pre>
 

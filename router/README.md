@@ -1,22 +1,30 @@
 #Summary
 
 Fleta's router is a connection library that supports communication between multiple chains.
-플래타의 라우터는 multy chain간의 통신을 지원해주는 인터넷 중계 라이브러리입니다.
+플래타의 라우터는 multi chain간의 통신을 지원해주는 인터넷 중계 라이브러리입니다.
 The incoming packet is distributed based on the coordinates of each chain to support independent communication between the chains.
 하나의 connection으로 들어오는 packet을 각 chain의 coordinate로 구분하여 분배하는 과정을 추가하여 chain간의 독립적인 통신을 지원합니다.
 
 #examples
 
 <pre><code>cd := common.Coordinate{}
-r := router.NewRouter("tcp", 3000) // 라우터 생성(network string, port uint16)
-r.AddListen(&cd)                   // listen 과정
+r, err := router.NewRouter(&router.Config{
+	Network:      "tcp",
+	Port:         3000,
+	StorePath:    "./_data/router1",
+	BanEvilScore: 100,
+}) // create router
+if err != nil {
+	panic(err)
+}
+r.AddListen(&cd) // listen 과정
 
 wg := sync.WaitGroup{} // wg : 테스트 코드를 모두 수행할때 까지 wait시킬 WaitGroup
 wg.Add(2)              // wg : 전송하고 받는 2가지 케이스를 wait
 
 go func() {
-	conn, err := r.Accept(&cd) // 연결시도가 들어오면 conn을 리턴
-	if err != nil {            // conn을 받은 이후 에러가 발생 할 경우 패닉처리
+	conn, _, err := r.Accept(&cd) // 연결시도가 들어오면 conn을 리턴
+	if err != nil {               // conn을 받은 이후 에러가 발생 할 경우 패닉처리
 		panic(err)
 	}
 	conn.Write([]byte("hello fleta")) // conn에 test messgae 전송
@@ -24,11 +32,19 @@ go func() {
 }()
 
 go func() {
-	otherRouter := router.NewRouter("tcp", 3000) // 다른 라우터를 생성
+	otherRouter, err := router.NewRouter(&router.Config{
+		Network:      "tcp",
+		Port:         3000,
+		StorePath:    "./_data/router2",
+		BanEvilScore: 100,
+	}) // 다른 라우터를 생성
+	if err != nil {
+		panic(err)
+	}
 
 	go func() {
-		conn, err := otherRouter.Accept(&cd) // 연결이 수립되면 conn을 리턴
-		if err != nil {                      // conn을 받은 이후 에러가 발생 할 경우 패닉처리
+		conn, _, err := otherRouter.Accept(&cd) // 연결이 수립되면 conn을 리턴
+		if err != nil {                         // conn을 받은 이후 에러가 발생 할 경우 패닉처리
 			panic(err)
 		}
 		bs := make([]byte, 2048)
@@ -40,10 +56,7 @@ go func() {
 		wg.Done()                   // wg : 받는 케이스 완료
 	}()
 
-	err := otherRouter.Request("127.0.0.1:3000", &cd) // 로컬 호스트에 연결
-	if err != nil {                                   // receiver를 받은 이후 에러가 발생 할 경우 패닉처리
-		panic(err)
-	}
+	otherRouter.Request("127.0.0.1:3000", &cd) // 로컬 호스트에 연결
 }()
 
 wg.Wait() // wg : 2가지 케이스가 완료 될 때까지 대기</code></pre>
@@ -54,18 +67,32 @@ wg.Wait() // wg : 2가지 케이스가 완료 될 때까지 대기</code></pre>
 
 # Functions
 
-<pre><code>NewRouter(Network string, port uint16) Router
+<pre><code>NewRouter(Config) Router
 
 type Router interface {
 	AddListen(ChainCoord *common.Coordinate) error
 	Request(addrStr string, ChainCoord *common.Coordinate) error
-	Accept(ChainCoord *common.Coordinate) (net.Conn, error)
+	Accept(ChainCoord *common.Coordinate) (net.Conn, time.Duration, error)
+	Localhost() string
+	GetEvilScore(addr string) (addEvilScore uint16, err error)
+	UpdateEvilScore(addr string, addEvilScore uint16) error
 }</code></pre>
 
 ## NewRouter(Network string, port uint16) Router
 
 <pre><code>NewRouter is the constructor of the router.
-This constructor receives the network (tcp, udp, etc...) and port number as parameters.</code></pre>
+This constructor receives the network (tcp, udp, etc...), port number, StorePath and BanEvilScore as parameters.
+
+Config consists of:
+
+type Config struct {
+	Network      string
+	Port         int
+	StorePath    string
+	BanEvilScore int
+}
+
+</code></pre>
 
 ## AddListen(ChainCoord *common.Coordinate) error
 

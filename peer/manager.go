@@ -82,9 +82,9 @@ func NewManager(ChainCoord *common.Coordinate, r router.Router, mm *message.Mana
 		ChainCoord:   ChainCoord,
 		router:       r,
 		mm:           mm,
-		nodes:        ns,             //make(map[string]peermessage.ConnectInfo),
-		candidates:   candidateMap{}, //make(map[string]candidateState),
-		connections:  connectMap{},   //make(map[string]*Peer),
+		nodes:        ns,
+		candidates:   candidateMap{},
+		connections:  connectMap{},
 		eventHandler: []EventHandler{},
 	}
 	pm.peerStorage = storage.NewPeerStorage(pm.kickOutPeerStorage)
@@ -167,20 +167,11 @@ func (pm *manager) AddNode(addr string) error {
 	} else {
 		return router.ErrCanNotConnectToEvilNode
 	}
-	// if err := pm.router.Request(addr, pm.ChainCoord); err != nil {
-	// 	log.Error("StartManage connect seednode ", err)
-	// 	return err
-	// }
 	return nil
 }
 
 //BroadCast is used to propagate messages to all nodes.
 func (pm *manager) BroadCast(m message.Message) {
-	// for p := range pm.connections.Range() {
-	// 	if p != nil {
-	// 		p.Send(m)
-	// 	}
-	// }
 	pm.connections.Range(func(addr string, p Peer) bool {
 		p.Send(m)
 		return true
@@ -370,13 +361,6 @@ func (pm *manager) kickOutPeerStorage(ip storage.IPeer) {
 	if p, ok := ip.(Peer); ok {
 		if pm.connections.Len() > storage.MaxPeerStorageLen()*2 {
 			closePeer := p
-			// for p := range pm.connections.Range() {
-			// 	if closePeer.connectedTime > p.connectedTime {
-			// 		if !pm.peerStorage.Have(p.ID()) {
-			// 			closePeer = p
-			// 		}
-			// 	}
-			// }
 			pm.connections.Range(func(addr string, p Peer) bool {
 				if closePeer.ConnectedTime() > p.ConnectedTime() {
 					if !pm.peerStorage.Have(addr) {
@@ -399,9 +383,6 @@ func (pm *manager) deletePeer(addr string) {
 	}
 	pm.eventHandlerLock.Unlock()
 	pm.connections.Delete(addr)
-	// if pm.peerStorage.NotEnoughPeer() {
-	// 	pm.appendPeerStorage()
-	// }
 }
 
 func (pm *manager) addPeer(p Peer) {
