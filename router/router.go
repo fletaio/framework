@@ -7,19 +7,19 @@ import (
 	"sync"
 	"time"
 
+	"git.fleta.io/fleta/framework/router/evil_node"
+
 	"git.fleta.io/fleta/common"
 	"git.fleta.io/fleta/network"
-	"github.com/dgraph-io/badger"
 
 	"git.fleta.io/fleta/framework/log"
 )
 
 // Config is router config
 type Config struct {
-	Network      string
-	Port         int
-	StorePath    string
-	BanEvilScore int
+	Network        string
+	Port           int
+	EvilNodeConfig evilnode.Config
 }
 
 //Router that converts external connections to logical connections.
@@ -28,32 +28,27 @@ type Router interface {
 	Request(addrStr string, ChainCoord *common.Coordinate) error
 	Accept(ChainCoord *common.Coordinate) (net.Conn, time.Duration, error)
 	Localhost() string
-	GetEvilScore(addr string) (addEvilScore uint16, err error)
-	UpdateEvilScore(addr string, addEvilScore uint16) error
+	EvilNodeManager() *evilnode.EvilNodeManager
 }
 
 type router struct {
-	Config        *Config
-	localhost     string
-	ListenersLock sync.Mutex
-	Listeners     ListenerMap
-	PConn         PConnMap
-	PList         *PConnList
-	ReceiverChan  ReceiverChanMap
+	Config          *Config
+	localhost       string
+	ListenersLock   sync.Mutex
+	Listeners       ListenerMap
+	PConn           PConnMap
+	evilNodeManager *evilnode.EvilNodeManager
+	ReceiverChan    ReceiverChanMap
 }
 
 // NewRouter is creator of router
 func NewRouter(Config *Config) (Router, error) {
-	pl, err := NewPConnList(Config.StorePath)
-	if err != nil {
-		return nil, err
-	}
 	return &router{
-		Config:       Config,
-		Listeners:    ListenerMap{},
-		PConn:        PConnMap{},
-		PList:        pl,
-		ReceiverChan: ReceiverChanMap{},
+		Config:          Config,
+		Listeners:       ListenerMap{},
+		PConn:           PConnMap{},
+		evilNodeManager: evilnode.NewEvilNodeManager(&Config.EvilNodeConfig),
+		ReceiverChan:    ReceiverChanMap{},
 	}, nil
 }
 
@@ -92,11 +87,7 @@ func (r *router) Request(addr string, ChainCoord *common.Coordinate) error {
 		return ErrCannotRequestToLocal
 	}
 
-	es, err := r.GetEvilScore(addr)
-	if err != nil {
-		return err
-	}
-	if es > uint16(r.Config.BanEvilScore) {
+	if r.evilNodeManager.IsBanNode(addr) {
 		return ErrCanNotConnectToEvilNode
 	}
 
@@ -136,6 +127,10 @@ func (r *router) Accept(ChainCoord *common.Coordinate) (net.Conn, time.Duration,
 	return c, receiver.ping, nil
 }
 
+func (r *router) EvilNodeManager() *evilnode.EvilNodeManager {
+	return r.evilNodeManager
+}
+
 func (r *router) Localhost() string {
 	return r.localhost
 }
@@ -173,46 +168,13 @@ func (r *router) listening(l net.Listener) {
 	}
 }
 
-// GetEvilScore is get evel score
-func (r *router) GetEvilScore(addr string) (EvilScore uint16, err error) {
-	pi, err := r.PList.Get(addr)
-	if err != nil {
-		if err == badger.ErrKeyNotFound {
-			pi = PhysicalConnectionInfo{
-				Addr:      addr,
-				EvilScore: 0,
-			}
-			r.PList.Store(pi)
-		} else {
-			return 0, err
-		}
-	}
-
-	return pi.EvilScore, nil
-}
-
-// UpdateEvilScore is add evel score
-func (r *router) UpdateEvilScore(addr string, addEvilScore uint16) error {
-	pi, err := r.PList.Get(addr)
-	if err != nil {
-		return err
-	}
-
-	pi.EvilScore += addEvilScore
-	return r.PList.Store(pi)
-}
-
 func (r *router) incommingConn(conn net.Conn) (*physicalConnection, error) {
 	if r.localhost == "" {
 		r.SetLocalhost(conn.LocalAddr().String())
 	}
 
 	addr := conn.RemoteAddr().String()
-	es, err := r.GetEvilScore(addr)
-	if err != nil {
-		return nil, err
-	}
-	if es > uint16(r.Config.BanEvilScore) {
+	if r.evilNodeManager.IsBanNode(addr) {
 		return nil, ErrCanNotConnectToEvilNode
 	}
 

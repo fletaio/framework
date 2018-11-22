@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"git.fleta.io/fleta/framework/router/evil_node"
+
 	"git.fleta.io/fleta/common"
 	"git.fleta.io/fleta/framework/log"
 	"git.fleta.io/fleta/framework/message"
@@ -64,13 +66,15 @@ func Test_manager_BroadCast(t *testing.T) {
 			args: args{
 				ChainCoord: &common.Coordinate{},
 				DefaultRouterConfig: &router.Config{
-					Network:   "mock:",
-					Port:      port,
-					StorePath: path + "/router",
+					Network: "mock:",
+					Port:    port,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    path + "/router",
+						BanEvilScore: 100,
+					},
 				},
 				DefaultConfig: &Config{
-					BanEvilScore: 1000,
-					StorePath:    path + "/peer",
+					StorePath: path + "/peer",
 				},
 				IDs: func() []int {
 					IDs := make([]int, 0, size)
@@ -91,13 +95,15 @@ func Test_manager_BroadCast(t *testing.T) {
 
 			creator := func(id int) *testMessage {
 				rc := &router.Config{
-					Network:   tt.args.DefaultRouterConfig.Network + "testid" + strconv.Itoa(id),
-					Port:      tt.args.DefaultRouterConfig.Port,
-					StorePath: tt.args.DefaultRouterConfig.StorePath + strconv.Itoa(id) + "/",
+					Network: tt.args.DefaultRouterConfig.Network + "testid" + strconv.Itoa(id),
+					Port:    tt.args.DefaultRouterConfig.Port,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    tt.args.DefaultRouterConfig.EvilNodeConfig.StorePath + strconv.Itoa(id) + "/",
+						BanEvilScore: tt.args.DefaultRouterConfig.EvilNodeConfig.BanEvilScore,
+					},
 				}
 				pc := &Config{
-					BanEvilScore: tt.args.DefaultConfig.BanEvilScore,
-					StorePath:    tt.args.DefaultConfig.StorePath + strconv.Itoa(id) + "/",
+					StorePath: tt.args.DefaultConfig.StorePath + strconv.Itoa(id) + "/",
 				}
 				r, _ := router.NewRouter(rc)
 				mm := message.NewManager()
@@ -199,13 +205,15 @@ func Test_manager_ExceptCast(t *testing.T) {
 			args: args{
 				ChainCoord: &common.Coordinate{},
 				DefaultRouterConfig: &router.Config{
-					Network:   "mock:",
-					Port:      port,
-					StorePath: path + "/router",
+					Network: "mock:",
+					Port:    port,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    path + "/router",
+						BanEvilScore: 100,
+					},
 				},
 				DefaultConfig: &Config{
-					BanEvilScore: 1000,
-					StorePath:    path + "/peer",
+					StorePath: path + "/peer",
 				},
 				IDs: func() []int {
 					IDs := make([]int, 0, size)
@@ -227,13 +235,15 @@ func Test_manager_ExceptCast(t *testing.T) {
 
 			creator := func(id int) *testMessage {
 				rc := &router.Config{
-					Network:   tt.args.DefaultRouterConfig.Network + "testid" + strconv.Itoa(id),
-					Port:      tt.args.DefaultRouterConfig.Port,
-					StorePath: tt.args.DefaultRouterConfig.StorePath + strconv.Itoa(id) + "/",
+					Network: tt.args.DefaultRouterConfig.Network + "testid" + strconv.Itoa(id),
+					Port:    tt.args.DefaultRouterConfig.Port,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    tt.args.DefaultRouterConfig.EvilNodeConfig.StorePath + strconv.Itoa(id) + "/",
+						BanEvilScore: tt.args.DefaultRouterConfig.EvilNodeConfig.BanEvilScore,
+					},
 				}
 				pc := &Config{
-					BanEvilScore: tt.args.DefaultConfig.BanEvilScore,
-					StorePath:    tt.args.DefaultConfig.StorePath + strconv.Itoa(id) + "/",
+					StorePath: tt.args.DefaultConfig.StorePath + strconv.Itoa(id) + "/",
 				}
 				r, _ := router.NewRouter(rc)
 				mm := message.NewManager()
@@ -341,13 +351,15 @@ func Test_target_cast(t *testing.T) {
 			args: args{
 				ChainCoord: &common.Coordinate{},
 				DefaultRouterConfig: &router.Config{
-					Network:   "mock:",
-					Port:      port,
-					StorePath: path + "/router",
+					Network: "mock:",
+					Port:    port,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    path + "/router",
+						BanEvilScore: 1000,
+					},
 				},
 				DefaultConfig: &Config{
-					BanEvilScore: 1000,
-					StorePath:    path + "/peer",
+					StorePath: path + "/peer",
 				},
 				IDs: func() []int {
 					IDs := make([]int, 0, size)
@@ -369,13 +381,15 @@ func Test_target_cast(t *testing.T) {
 
 			creator := func(id int) *testMessage {
 				rc := &router.Config{
-					Network:   tt.args.DefaultRouterConfig.Network + "testid" + strconv.Itoa(id),
-					Port:      tt.args.DefaultRouterConfig.Port,
-					StorePath: tt.args.DefaultRouterConfig.StorePath + strconv.Itoa(id) + "/",
+					Network: tt.args.DefaultRouterConfig.Network + "testid" + strconv.Itoa(id),
+					Port:    tt.args.DefaultRouterConfig.Port,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    tt.args.DefaultRouterConfig.EvilNodeConfig.StorePath + strconv.Itoa(id) + "/",
+						BanEvilScore: tt.args.DefaultRouterConfig.EvilNodeConfig.BanEvilScore,
+					},
 				}
 				pc := &Config{
-					BanEvilScore: tt.args.DefaultConfig.BanEvilScore,
-					StorePath:    tt.args.DefaultConfig.StorePath + strconv.Itoa(id) + "/",
+					StorePath: tt.args.DefaultConfig.StorePath + strconv.Itoa(id) + "/",
 				}
 				r, _ := router.NewRouter(rc)
 				mm := message.NewManager()
@@ -469,13 +483,15 @@ func TestNewManager(t *testing.T) {
 			args: args{
 				ChainCoord: &common.Coordinate{},
 				routerConfig: &router.Config{
-					Network:   "mock:" + addr,
-					Port:      port,
-					StorePath: path + "/router/",
+					Network: "mock:" + addr,
+					Port:    port,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    path + "/router/",
+						BanEvilScore: 100,
+					},
 				},
 				Config: &Config{
-					BanEvilScore: 100,
-					StorePath:    path + "/peer/",
+					StorePath: path + "/peer/",
 				},
 				mm: message.NewManager(),
 			},
@@ -523,22 +539,26 @@ func TestAddNode(t *testing.T) {
 			args: args{
 				ChainCoord: &common.Coordinate{},
 				routerConfig1: &router.Config{
-					Network:   "mock:" + addr1,
-					Port:      port,
-					StorePath: path + "/router1/",
+					Network: "mock:" + addr1,
+					Port:    port,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    path + "/router1/",
+						BanEvilScore: 100,
+					},
 				},
 				Config1: &Config{
-					BanEvilScore: 100,
-					StorePath:    path + "/peer1/",
+					StorePath: path + "/peer1/",
 				},
 				routerConfig2: &router.Config{
-					Network:   "mock:" + addr2,
-					Port:      port,
-					StorePath: path + "/router2/",
+					Network: "mock:" + addr2,
+					Port:    port,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    path + "/router2/",
+						BanEvilScore: 100,
+					},
 				},
 				Config2: &Config{
-					BanEvilScore: 100,
-					StorePath:    path + "/peer2/",
+					StorePath: path + "/peer2/",
 				},
 				mm: message.NewManager(),
 			},
@@ -610,13 +630,15 @@ func TestBanEvil(t *testing.T) {
 			args: args{
 				ChainCoord: &common.Coordinate{},
 				routerConfig1: &router.Config{
-					Network:   "mock:" + addr,
-					Port:      port,
-					StorePath: path + "/router1/",
+					Network: "mock:" + addr,
+					Port:    port,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    path + "/router1/",
+						BanEvilScore: 30,
+					},
 				},
 				Config1: &Config{
-					BanEvilScore: 100,
-					StorePath:    path + "/peer1/",
+					StorePath: path + "/peer1/",
 				},
 				mm: message.NewManager(),
 			},
@@ -630,23 +652,11 @@ func TestBanEvil(t *testing.T) {
 			r1, _ := router.NewRouter(tt.args.routerConfig1)
 			pm, _ := NewManager(tt.args.ChainCoord, r1, tt.args.mm, tt.args.Config1)
 			pm1 := pm.(*manager)
-			err := pm1.AddNode(tempAddr)
+			pm1.AddNode(tempAddr)
 			pm1.StartManage()
-			pm1.EnforceConnect()
-			time.Sleep(time.Millisecond * 100)
-			err = pm1.doManageCandidate(tempAddr, csPunishableRequestWait)
-			time.Sleep(time.Millisecond * 100)
-			err = pm1.doManageCandidate(tempAddr, csPunishableRequestWait)
-			time.Sleep(time.Millisecond * 100)
-			err = pm1.doManageCandidate(tempAddr, csPunishableRequestWait)
-			time.Sleep(time.Millisecond * 100)
+			pm1.doManageCandidate(tempAddr, csPunishableRequestWait)
 
-			if err != tt.wantErr {
-				t.Errorf("NewManager() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			err = pm1.AddNode(tempAddr)
+			err := pm1.AddNode(tempAddr)
 			if err != tt.wantErr {
 				t.Errorf("NewManager() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -680,13 +690,15 @@ func TestPeerListSpread(t *testing.T) {
 			args: args{
 				ChainCoord: &common.Coordinate{},
 				DefaultRouterConfig: &router.Config{
-					Network:   "mock:",
-					Port:      port,
-					StorePath: path + "/router",
+					Network: "mock:",
+					Port:    port,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    path + "/router",
+						BanEvilScore: 100,
+					},
 				},
 				DefaultConfig: &Config{
-					BanEvilScore: 100,
-					StorePath:    path + "/peer",
+					StorePath: path + "/peer",
 				},
 				IDs: func() []int {
 					IDs := make([]int, 0, size)
@@ -705,13 +717,15 @@ func TestPeerListSpread(t *testing.T) {
 
 			creator := func(id int) Manager {
 				rc := &router.Config{
-					Network:   tt.args.DefaultRouterConfig.Network + "testid" + strconv.Itoa(id),
-					Port:      tt.args.DefaultRouterConfig.Port,
-					StorePath: tt.args.DefaultRouterConfig.StorePath + strconv.Itoa(id) + "/",
+					Network: tt.args.DefaultRouterConfig.Network + "testid" + strconv.Itoa(id),
+					Port:    tt.args.DefaultRouterConfig.Port,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    tt.args.DefaultRouterConfig.EvilNodeConfig.StorePath + strconv.Itoa(id) + "/",
+						BanEvilScore: tt.args.DefaultRouterConfig.EvilNodeConfig.BanEvilScore,
+					},
 				}
 				pc := &Config{
-					BanEvilScore: tt.args.DefaultConfig.BanEvilScore,
-					StorePath:    tt.args.DefaultConfig.StorePath + strconv.Itoa(id) + "/",
+					StorePath: tt.args.DefaultConfig.StorePath + strconv.Itoa(id) + "/",
 				}
 				r, _ := router.NewRouter(rc)
 				mm := message.NewManager()
@@ -786,22 +800,26 @@ func Test_manager_EnforceConnect(t *testing.T) {
 			args: args{
 				ChainCoord: &common.Coordinate{},
 				routerConfig1: &router.Config{
-					Network:   "mock:" + addr1,
-					Port:      port,
-					StorePath: path + "/router1/",
+					Network: "mock:" + addr1,
+					Port:    port,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    path + "/router1/",
+						BanEvilScore: 100,
+					},
 				},
 				Config1: &Config{
-					BanEvilScore: 100,
-					StorePath:    path + "/peer1/",
+					StorePath: path + "/peer1/",
 				},
 				routerConfig2: &router.Config{
-					Network:   "mock:" + addr2,
-					Port:      port,
-					StorePath: path + "/router2/",
+					Network: "mock:" + addr2,
+					Port:    port,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    path + "/router2/",
+						BanEvilScore: 100,
+					},
 				},
 				Config2: &Config{
-					BanEvilScore: 100,
-					StorePath:    path + "/peer2/",
+					StorePath: path + "/peer2/",
 				},
 				mm: message.NewManager(),
 			},
@@ -881,30 +899,32 @@ func Test_multi_chain_send(t *testing.T) {
 				ChainCoord1: common.NewCoordinate(0, 1),
 				ChainCoord2: common.NewCoordinate(0, 2),
 				routerConfig1: &router.Config{
-					Network:   "mock:" + addr1,
-					Port:      port,
-					StorePath: path + "/router1/",
+					Network: "mock:" + addr1,
+					Port:    port,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    path + "/router1/",
+						BanEvilScore: 100,
+					},
 				},
 				Config1_1: &Config{
-					BanEvilScore: 100,
-					StorePath:    path + "/peer1_1/",
+					StorePath: path + "/peer1_1/",
 				},
 				Config1_2: &Config{
-					BanEvilScore: 100,
-					StorePath:    path + "/peer1_2/",
+					StorePath: path + "/peer1_2/",
 				},
 				routerConfig2: &router.Config{
-					Network:   "mock:" + addr2,
-					Port:      port,
-					StorePath: path + "/router2/",
+					Network: "mock:" + addr2,
+					Port:    port,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    path + "/router2/",
+						BanEvilScore: 100,
+					},
 				},
 				Config2_1: &Config{
-					BanEvilScore: 100,
-					StorePath:    path + "/peer2_1/",
+					StorePath: path + "/peer2_1/",
 				},
 				Config2_2: &Config{
-					BanEvilScore: 100,
-					StorePath:    path + "/peer2_2/",
+					StorePath: path + "/peer2_2/",
 				},
 			},
 			want:    true,

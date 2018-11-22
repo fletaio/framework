@@ -1,4 +1,4 @@
-package router
+package evilnode
 
 import (
 	"bytes"
@@ -9,25 +9,31 @@ import (
 	"github.com/dgraph-io/badger"
 )
 
-// PConnList stores information for peers even connected at least once.
-type PConnList struct {
+// ConnList stores information for peers even connected at least once.
+type ConnList struct {
 	db *badger.DB
 }
 
-// NewPConnList is creator of physical Connection list
-func NewPConnList(dbpath string) (*PConnList, error) {
+//evilScoreTable
+const (
+	EvilScoreTableDialFail        uint16 = 40
+	EvilScoreTableReducePerMinute uint16 = 1
+)
+
+// NewConnList is creator of physical Connection list
+func NewConnList(dbpath string) (*ConnList, error) {
 	db, err := openNodesDB(dbpath)
 	if err != nil {
 		return nil, err
 	}
-	n := &PConnList{
+	n := &ConnList{
 		db: db,
 	}
 	return n, nil
 }
 
-// Store is strore the physicalConnectionInfo
-func (pl *PConnList) Store(v PhysicalConnectionInfo) error {
+// Store is strore the ConnectionInfo
+func (pl *ConnList) Store(v ConnectionInfo) error {
 	err := pl.db.Update(func(txn *badger.Txn) error {
 		bf := bytes.Buffer{}
 		v.WriteTo(&bf)
@@ -40,8 +46,8 @@ func (pl *PConnList) Store(v PhysicalConnectionInfo) error {
 	return err
 }
 
-// Get is returned strored physicalConnectionInfo
-func (pl *PConnList) Get(addr string) (p PhysicalConnectionInfo, err error) {
+// Get is returned strored ConnectionInfo
+func (pl *ConnList) Get(addr string) (p ConnectionInfo, err error) {
 	var v []byte
 	if err2 := pl.db.View(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte(addr))

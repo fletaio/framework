@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"git.fleta.io/fleta/framework/router/evil_node"
+
 	"git.fleta.io/fleta/common"
 	"git.fleta.io/fleta/framework/log"
 )
@@ -94,14 +96,20 @@ func Test_router_Connecte(t *testing.T) {
 			args: args{
 				ChainCoord: &common.Coordinate{},
 				Config1: &Config{
-					Network:   "mock:test1",
-					Port:      3000,
-					StorePath: "./test/debug1/",
+					Network: "mock:test1",
+					Port:    3000,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    "./test/debug1/",
+						BanEvilScore: 100,
+					},
 				},
 				Config2: &Config{
-					Network:   "mock:test2",
-					Port:      3000,
-					StorePath: "./test/debug2/",
+					Network: "mock:test2",
+					Port:    3000,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    "./test/debug2/",
+						BanEvilScore: 100,
+					},
 				},
 			},
 			want:    true,
@@ -161,14 +169,20 @@ func Test_router_Connecte_send(t *testing.T) {
 			args: args{
 				ChainCoord: &common.Coordinate{},
 				Config1: &Config{
-					Network:   "mock:send1",
-					Port:      3002,
-					StorePath: "./test/send1/",
+					Network: "mock:send1",
+					Port:    3002,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    "./test/send1/",
+						BanEvilScore: 100,
+					},
 				},
 				Config2: &Config{
-					Network:   "mock:send2",
-					Port:      3002,
-					StorePath: "./test/send2/",
+					Network: "mock:send2",
+					Port:    3002,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    "./test/send2/",
+						BanEvilScore: 100,
+					},
 				},
 			},
 			want:    true,
@@ -237,9 +251,12 @@ func Test_router_Connecte_request_to_local(t *testing.T) {
 			args: args{
 				ChainCoord: &common.Coordinate{},
 				Config1: &Config{
-					Network:   "mock:requesttolocal",
-					Port:      3001,
-					StorePath: "./test/debug3/",
+					Network: "mock:requesttolocal",
+					Port:    3001,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    "./test/debug3/",
+						BanEvilScore: 100,
+					},
 				},
 			},
 			wantErr: ErrCannotRequestToLocal,
@@ -328,9 +345,12 @@ func Test_EvilScore(t *testing.T) {
 			args: args{
 				ChainCoord: &common.Coordinate{},
 				Config: &Config{
-					Network:   "mock:evilscore",
-					Port:      3005,
-					StorePath: "./test/evilscore/",
+					Network: "mock:evilscore",
+					Port:    3005,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    "./test/evilscore/",
+						BanEvilScore: 100,
+					},
 				},
 			},
 			want: 10,
@@ -338,28 +358,21 @@ func Test_EvilScore(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pl, _ := NewPConnList(tt.args.Config.StorePath)
-			pl.Store(PhysicalConnectionInfo{
-				Addr:      "test",
-				EvilScore: 10,
-			})
+			os.RemoveAll(tt.args.Config.EvilNodeConfig.StorePath)
 
-			pi, err := pl.Get("test")
-			if err != nil {
-				t.Errorf("err = %v", err)
-			}
-			if pi.EvilScore != tt.want {
-				t.Errorf("pi.EvilScore = %v, want %v", pi.EvilScore, tt.want)
+			targetAddr := "testaddr:3000"
+			em := evilnode.NewEvilNodeManager(&tt.args.Config.EvilNodeConfig)
+			if em.IsBanNode(targetAddr) {
+				t.Errorf("not expect ban first")
+				return
 			}
 
-			pi.EvilScore *= tt.want
-			pl.Store(pi)
-			pi, err = pl.Get("test")
-			if err != nil {
-				t.Errorf("err = %v", err)
-			}
-			if pi.EvilScore != tt.want*tt.want {
-				t.Errorf("pi.EvilScore = %v, want %v", pi.EvilScore, tt.want)
+			em.TellOn(targetAddr, evilnode.KindOfEvil(1000))
+
+			value := !em.IsBanNode(targetAddr)
+			if value {
+				t.Errorf("expect ban value true but %v", value)
+				return
 			}
 		})
 	}
@@ -382,14 +395,20 @@ func Test_router_UpdateEvilScore(t *testing.T) {
 			args: args{
 				ChainCoord: &common.Coordinate{},
 				Config1: &Config{
-					Network:   "mock:evilscore1",
-					Port:      3004,
-					StorePath: "./test/evilscore1/",
+					Network: "mock:evilscore1",
+					Port:    3004,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    "./test/evilscore1/",
+						BanEvilScore: 100,
+					},
 				},
 				Config2: &Config{
-					Network:   "mock:evilscore2",
-					Port:      3004,
-					StorePath: "./test/evilscore2/",
+					Network: "mock:evilscore2",
+					Port:    3004,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    "./test/evilscore2/",
+						BanEvilScore: 100,
+					},
 				},
 			},
 			want:    "NotConnected",
@@ -398,8 +417,8 @@ func Test_router_UpdateEvilScore(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			os.RemoveAll(tt.args.Config1.StorePath)
-			os.RemoveAll(tt.args.Config2.StorePath)
+			os.RemoveAll(tt.args.Config1.EvilNodeConfig.StorePath)
+			os.RemoveAll(tt.args.Config2.EvilNodeConfig.StorePath)
 			r1, _ := NewRouter(tt.args.Config1)
 			r2, _ := NewRouter(tt.args.Config2)
 
@@ -423,7 +442,7 @@ func Test_router_UpdateEvilScore(t *testing.T) {
 
 			wg.Wait()
 
-			r1.UpdateEvilScore(readConn.RemoteAddr().String(), 1000)
+			r1.EvilNodeManager().TellOn(readConn.RemoteAddr().String(), evilnode.KindOfEvil(200))
 			readConn.Close()
 
 			time.Sleep(time.Second * 3)
@@ -487,14 +506,20 @@ func Test_Compress(t *testing.T) {
 			args: args{
 				ChainCoord: &common.Coordinate{},
 				Config1: &Config{
-					Network:   "mock:Compress1",
-					Port:      3006,
-					StorePath: "./test/Compress1/",
+					Network: "mock:Compress1",
+					Port:    3006,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    "./test/Compress1/",
+						BanEvilScore: 100,
+					},
 				},
 				Config2: &Config{
-					Network:   "mock:Compress2",
-					Port:      3006,
-					StorePath: "./test/Compress2/",
+					Network: "mock:Compress2",
+					Port:    3006,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    "./test/Compress2/",
+						BanEvilScore: 100,
+					},
 				},
 			},
 			want: true,

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dgraph-io/badger"
+	"git.fleta.io/fleta/framework/router/evil_node"
 
 	"git.fleta.io/fleta/common"
 	"git.fleta.io/fleta/framework/log"
@@ -20,8 +20,7 @@ import (
 
 //Config is structure storing settings information
 type Config struct {
-	StorePath    string
-	BanEvilScore uint16
+	StorePath string
 }
 
 // peer errors
@@ -154,13 +153,7 @@ func (pm *manager) AddNode(addr string) error {
 		return nil
 	}
 
-	evilScore, err := pm.router.GetEvilScore(addr)
-	if err != nil {
-		if err != badger.ErrKeyNotFound {
-			return err
-		}
-	}
-	if evilScore < pm.Config.BanEvilScore {
+	if !pm.router.EvilNodeManager().IsBanNode(addr) {
 		pm.candidates.store(addr, csRequestWait)
 		go pm.doManageCandidate(addr, csRequestWait)
 		log.Debug("AddNode ", pm.router.Localhost(), addr)
@@ -298,7 +291,7 @@ func (pm *manager) doManageCandidate(addr string, cs candidateState) error {
 	case csPunishableRequestWait:
 		err = pm.router.Request(addr, pm.ChainCoord)
 		if err != nil {
-			pm.router.UpdateEvilScore(addr, 40)
+			pm.router.EvilNodeManager().TellOn(addr, evilnode.DialFail)
 			log.Error("RequestWait2 err ", err)
 		}
 	case csPeerListWait:
