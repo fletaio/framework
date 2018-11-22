@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"git.fleta.io/fleta/common"
-	network "git.fleta.io/fleta/mocknet"
+	"git.fleta.io/fleta/network"
 	"github.com/dgraph-io/badger"
 
 	"git.fleta.io/fleta/framework/log"

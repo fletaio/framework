@@ -48,7 +48,7 @@ func Test_removePort(t *testing.T) {
 			wantErr: ErrNotFoundPort,
 		},
 		{
-			name: "multycolon",
+			name: "multicolon",
 			args: args{
 				addr: "[test:test:test:test]:123",
 			},
@@ -56,7 +56,7 @@ func Test_removePort(t *testing.T) {
 			wantErr: nil,
 		},
 		{
-			name: "multycolonNotNum",
+			name: "multicolonNotNum",
 			args: args{
 				addr: "[test:test:test:test]:test",
 			},
