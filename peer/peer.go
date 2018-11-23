@@ -57,11 +57,6 @@ func (p *peer) ConnectedTime() int64 {
 	return p.connectedTime
 }
 
-//ID returned peer ID
-func (p *peer) ID() string {
-	return p.Conn.RemoteAddr().String()
-}
-
 func (p *peer) readPacket() {
 	for !p.closed {
 		BNum := make([]byte, 8)

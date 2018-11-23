@@ -114,12 +114,12 @@ func (pc *physicalConnection) run() error {
 									if err != nil {
 										log.Error("physicalConnection run acceptConn err : ", err)
 									}
+									continue
 								}
 							}
-						} else {
-							log.Error("no time map ", uuid.String())
-							pc.handshake(ChainCoord)
 						}
+						log.Error("no time map ", uuid.String())
+						pc.handshake(ChainCoord)
 
 					}
 

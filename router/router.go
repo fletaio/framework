@@ -28,7 +28,7 @@ type Router interface {
 	Request(addrStr string, ChainCoord *common.Coordinate) error
 	Accept(ChainCoord *common.Coordinate) (net.Conn, time.Duration, error)
 	Localhost() string
-	EvilNodeManager() *evilnode.EvilNodeManager
+	EvilNodeManager() *evilnode.Manager
 }
 
 type router struct {
@@ -37,7 +37,7 @@ type router struct {
 	ListenersLock   sync.Mutex
 	Listeners       ListenerMap
 	PConn           PConnMap
-	evilNodeManager *evilnode.EvilNodeManager
+	evilNodeManager *evilnode.Manager
 	ReceiverChan    ReceiverChanMap
 }
 
@@ -47,7 +47,7 @@ func NewRouter(Config *Config) (Router, error) {
 		Config:          Config,
 		Listeners:       ListenerMap{},
 		PConn:           PConnMap{},
-		evilNodeManager: evilnode.NewEvilNodeManager(&Config.EvilNodeConfig),
+		evilNodeManager: evilnode.NewManager(&Config.EvilNodeConfig),
 		ReceiverChan:    ReceiverChanMap{},
 	}, nil
 }
@@ -127,7 +127,7 @@ func (r *router) Accept(ChainCoord *common.Coordinate) (net.Conn, time.Duration,
 	return c, receiver.ping, nil
 }
 
-func (r *router) EvilNodeManager() *evilnode.EvilNodeManager {
+func (r *router) EvilNodeManager() *evilnode.Manager {
 	return r.evilNodeManager
 }
 
@@ -135,7 +135,7 @@ func (r *router) Localhost() string {
 	return r.localhost
 }
 
-func (r *router) SetLocalhost(l string) {
+func (r *router) setLocalhost(l string) {
 	addr, _ := removePort(l)
 	r.localhost = addr
 }
@@ -170,7 +170,7 @@ func (r *router) listening(l net.Listener) {
 
 func (r *router) incommingConn(conn net.Conn) (*physicalConnection, error) {
 	if r.localhost == "" {
-		r.SetLocalhost(conn.LocalAddr().String())
+		r.setLocalhost(conn.LocalAddr().String())
 	}
 
 	addr := conn.RemoteAddr().String()
@@ -215,7 +215,6 @@ func removePort(addr string) (string, error) {
 			addr = strings.Join(splitPort[:len(splitPort)-1], ":")
 			return addr, nil
 		}
-		return addr, ErrNotFoundPort
 	}
 	return addr, ErrNotFoundPort
 }

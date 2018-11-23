@@ -14,11 +14,13 @@ type Config struct {
 	BanEvilScore uint16
 }
 
+// NoticeEvil is interface for notifies the registered object when the evil node appears.
 type NoticeEvil interface {
 	NewEvilNode(string)
 }
 
-type EvilNodeManager struct {
+// Manager is node evil score manager
+type Manager struct {
 	Config     *Config
 	List       *ConnList
 	NoticeList map[string]NoticeEvil
@@ -34,7 +36,8 @@ const (
 
 const reduceEvilScorePerMinute uint16 = 1
 
-func NewEvilNodeManager(c *Config) *EvilNodeManager {
+// NewManager is creator of evilnode Manager
+func NewManager(c *Config) *Manager {
 	if c == nil {
 		c = &Config{
 			BanEvilScore: 100,
@@ -49,7 +52,7 @@ func NewEvilNodeManager(c *Config) *EvilNodeManager {
 		return nil
 	}
 
-	return &EvilNodeManager{
+	return &Manager{
 		Config:     c,
 		List:       pl,
 		NoticeList: map[string]NoticeEvil{},
@@ -57,13 +60,13 @@ func NewEvilNodeManager(c *Config) *EvilNodeManager {
 }
 
 // RegisterNoticeEvilNode is Registered notice EvilNode
-func (r *EvilNodeManager) RegisterNoticeEvilNode(ne NoticeEvil) {
+func (r *Manager) RegisterNoticeEvilNode(ne NoticeEvil) {
 	addr := fmt.Sprintf("%p", ne)
 	r.NoticeList[addr] = ne
 }
 
 // IsBanNode is return true value when the target node over the base evil score
-func (r *EvilNodeManager) IsBanNode(addr string) bool {
+func (r *Manager) IsBanNode(addr string) bool {
 	pi, err := r.List.Get(addr)
 	if err != nil {
 		if err == badger.ErrKeyNotFound {
@@ -74,12 +77,12 @@ func (r *EvilNodeManager) IsBanNode(addr string) bool {
 			}
 			r.List.Store(pi)
 		} else {
-			log.Error("EvilNodeManager IsBanNode ", err)
+			log.Error("Manager IsBanNode ", err)
 			return false
 		}
 	}
 
-	passedSecond := (time.Now().Sub(pi.Time) / time.Second) * time.Duration(reduceEvilScorePerMinute)
+	passedSecond := (time.Now().Sub(pi.Time) / time.Minute) * time.Duration(reduceEvilScorePerMinute)
 
 	var evilScore uint16
 	if pi.EvilScore < uint16(passedSecond) {
@@ -97,7 +100,7 @@ func (r *EvilNodeManager) IsBanNode(addr string) bool {
 }
 
 // TellOn is update nodes evil score
-func (r *EvilNodeManager) TellOn(addr string, es KindOfEvil) error {
+func (r *Manager) TellOn(addr string, es KindOfEvil) error {
 	pi, err := r.List.Get(addr)
 	if err != nil {
 		if err == badger.ErrKeyNotFound {
@@ -110,7 +113,7 @@ func (r *EvilNodeManager) TellOn(addr string, es KindOfEvil) error {
 		}
 	}
 
-	passedSecond := (time.Now().Sub(pi.Time) / time.Second) * time.Duration(reduceEvilScorePerMinute)
+	passedSecond := (time.Now().Sub(pi.Time) / time.Minute) * time.Duration(reduceEvilScorePerMinute)
 	if pi.EvilScore <= uint16(passedSecond) {
 		pi.EvilScore = 0
 	} else {

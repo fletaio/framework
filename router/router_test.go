@@ -361,7 +361,7 @@ func Test_EvilScore(t *testing.T) {
 			os.RemoveAll(tt.args.Config.EvilNodeConfig.StorePath)
 
 			targetAddr := "testaddr:3000"
-			em := evilnode.NewEvilNodeManager(&tt.args.Config.EvilNodeConfig)
+			em := evilnode.NewManager(&tt.args.Config.EvilNodeConfig)
 			if em.IsBanNode(targetAddr) {
 				t.Errorf("not expect ban first")
 				return
