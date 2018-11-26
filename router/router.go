@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"git.fleta.io/fleta/framework/router/evil_node"
+	"git.fleta.io/fleta/framework/router/evilnode"
 
 	"git.fleta.io/fleta/common"
 	"git.fleta.io/fleta/network"
