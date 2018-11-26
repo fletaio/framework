@@ -112,7 +112,7 @@ func (r *router) Request(addr string, ChainCoord *common.Coordinate) error {
 	}
 	pConn.handshake(ChainCoord)
 
-	// conn, err := mocknet.Dial(r.Config.Network, addr)
+	// conn, err := network.Dial(r.Config.Network, addr)
 	return nil
 }
 
