@@ -23,7 +23,7 @@ func DefineType(t string) Type {
 	return Type(binary.BigEndian.Uint64(h[:8]))
 }
 
-//  TypeToByte returns a byte array of the Type
+// TypeToByte returns a byte array of the Type
 func TypeToByte(t Type) []byte {
 	bs := make([]byte, 8)
 	binary.BigEndian.PutUint64(bs, uint64(t))
@@ -50,7 +50,7 @@ type Message interface {
 }
 
 // Creator TODO
-type Creator func(r io.Reader) Message
+type Creator func(r io.Reader, mt Type) (Message, error)
 
 // Handler TODO
 type Handler func(m Message) error
@@ -81,8 +81,11 @@ func (mm *Manager) ParseMessage(r io.Reader, mt Type) (Message, Handler, error) 
 	if !has {
 		return nil, nil, ErrUnknownMessage
 	}
-	return c.creator(r), c.handler, nil
-
+	msg, err := c.creator(r, mt)
+	if err != nil {
+		return nil, nil, err
+	}
+	return msg, c.handler, nil
 }
 
 // ApplyMessage is a function to register a message.

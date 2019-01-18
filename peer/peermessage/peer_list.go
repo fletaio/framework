@@ -109,10 +109,12 @@ const (
 )
 
 // PeerListCreator TODO
-func PeerListCreator(r io.Reader) message.Message {
+func PeerListCreator(r io.Reader, mt message.Type) (message.Message, error) {
 	p := &PeerList{}
-	p.ReadFrom(r)
-	return p
+	if _, err := p.ReadFrom(r); err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
 // PeerListMessageType TODO
