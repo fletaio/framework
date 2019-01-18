@@ -49,7 +49,7 @@ func NewManager(c *Config) *Manager {
 
 	pl, err := NewConnList(c.StorePath)
 	if err != nil {
-		return nil
+		panic(err)
 	}
 
 	return &Manager{
@@ -91,7 +91,7 @@ func (r *Manager) IsBanNode(addr string) bool {
 		evilScore = pi.EvilScore - uint16(passedSecond)
 	}
 
-	log.Info("IsBanNode  evilScore : ", addr, " : ", evilScore, passedSecond)
+	log.Info("IsBanNode func evilScore : ", addr, " : ", evilScore, passedSecond)
 
 	if evilScore > r.Config.BanEvilScore {
 		return true
@@ -121,7 +121,7 @@ func (r *Manager) TellOn(addr string, es KindOfEvil) error {
 	}
 	pi.EvilScore += uint16(es)
 	pi.Time = time.Now()
-	log.Info("TellOn ", addr, ":", pi.EvilScore)
+	log.Info("TellOn ", r.Config.StorePath, ":", addr, ":", pi.EvilScore)
 
 	return r.List.Store(pi)
 }

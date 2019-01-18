@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"net"
 	"os"
@@ -14,6 +15,8 @@ import (
 	"git.fleta.io/fleta/common"
 	"git.fleta.io/fleta/framework/log"
 )
+
+var _port = 3000
 
 func Test_removePort(t *testing.T) {
 	type args struct {
@@ -80,6 +83,8 @@ func Test_removePort(t *testing.T) {
 }
 
 func Test_router_Connecte(t *testing.T) {
+	var Port = _port
+	_port++
 	type args struct {
 		ChainCoord *common.Coordinate
 		Config1    *Config
@@ -97,7 +102,7 @@ func Test_router_Connecte(t *testing.T) {
 				ChainCoord: &common.Coordinate{},
 				Config1: &Config{
 					Network: "mock:test1",
-					Port:    3000,
+					Port:    Port,
 					EvilNodeConfig: evilnode.Config{
 						StorePath:    "./test/debug1/",
 						BanEvilScore: 100,
@@ -105,7 +110,7 @@ func Test_router_Connecte(t *testing.T) {
 				},
 				Config2: &Config{
 					Network: "mock:test2",
-					Port:    3000,
+					Port:    Port,
 					EvilNodeConfig: evilnode.Config{
 						StorePath:    "./test/debug2/",
 						BanEvilScore: 100,
@@ -124,7 +129,7 @@ func Test_router_Connecte(t *testing.T) {
 			r1.AddListen(tt.args.ChainCoord)
 			r2.AddListen(tt.args.ChainCoord)
 
-			r2.Request("test1:3000", tt.args.ChainCoord)
+			r2.Request(fmt.Sprintf("test1:%v", Port), tt.args.ChainCoord)
 
 			wg := sync.WaitGroup{}
 			wg.Add(2)
@@ -153,6 +158,8 @@ func Test_router_Connecte(t *testing.T) {
 }
 
 func Test_router_Connecte_send(t *testing.T) {
+	var Port = _port
+	_port++
 	type args struct {
 		ChainCoord *common.Coordinate
 		Config1    *Config
@@ -170,7 +177,7 @@ func Test_router_Connecte_send(t *testing.T) {
 				ChainCoord: &common.Coordinate{},
 				Config1: &Config{
 					Network: "mock:send1",
-					Port:    3002,
+					Port:    Port,
 					EvilNodeConfig: evilnode.Config{
 						StorePath:    "./test/send1/",
 						BanEvilScore: 100,
@@ -178,7 +185,7 @@ func Test_router_Connecte_send(t *testing.T) {
 				},
 				Config2: &Config{
 					Network: "mock:send2",
-					Port:    3002,
+					Port:    Port,
 					EvilNodeConfig: evilnode.Config{
 						StorePath:    "./test/send2/",
 						BanEvilScore: 100,
@@ -236,7 +243,148 @@ func Test_router_Connecte_send(t *testing.T) {
 	}
 }
 
+func Test_router_MultyCoord_Connecte_send(t *testing.T) {
+	var Port = _port
+	_port++
+	type args struct {
+		ChainCoord1 *common.Coordinate
+		ChainCoord2 *common.Coordinate
+		Config1     *Config
+		Config2     *Config
+		Config3     *Config
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    bool
+		wantErr bool
+	}{
+		{
+			name: "string",
+			args: args{
+				ChainCoord1: common.NewCoordinate(0, 0),
+				ChainCoord2: common.NewCoordinate(0, 1),
+				Config1: &Config{
+					Network: "mock:send1",
+					Port:    Port,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    "./test/send1/",
+						BanEvilScore: 100,
+					},
+				},
+				Config2: &Config{
+					Network: "mock:send2",
+					Port:    Port,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    "./test/send2/",
+						BanEvilScore: 100,
+					},
+				},
+				Config3: &Config{
+					Network: "mock:send3",
+					Port:    Port,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    "./test/send3/",
+						BanEvilScore: 100,
+					},
+				},
+			},
+			want:    true,
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r1, _ := NewRouter(tt.args.Config1)
+			r2, _ := NewRouter(tt.args.Config2)
+			r3, _ := NewRouter(tt.args.Config3)
+
+			r1.AddListen(tt.args.ChainCoord1)
+			r1.AddListen(tt.args.ChainCoord2)
+			r2.AddListen(tt.args.ChainCoord1)
+			r3.AddListen(tt.args.ChainCoord2)
+
+			r2.Request(fmt.Sprintf("send1:%v", Port), tt.args.ChainCoord1)
+			r3.Request(fmt.Sprintf("send1:%v", Port), tt.args.ChainCoord2)
+
+			{
+				wg := sync.WaitGroup{}
+				wg.Add(2)
+
+				var readConn net.Conn
+				var writeConn net.Conn
+				go func() {
+					conn, _, _ := r1.Accept(tt.args.ChainCoord1)
+					readConn = conn
+					wg.Done()
+				}()
+				go func() {
+					conn, _, _ := r2.Accept(tt.args.ChainCoord1)
+					writeConn = conn
+					wg.Done()
+				}()
+				wg.Wait()
+
+				strChan := make(chan string)
+				go func() {
+					bs := make([]byte, 1024)
+					n, _ := readConn.Read(bs)
+					strChan <- string(bs[:n])
+				}()
+
+				go func() {
+					writeConn.Write([]byte("sendTest"))
+				}()
+
+				result := <-strChan
+
+				if (result == "sendTest") != tt.want {
+					t.Errorf("result = %v, want %v", result, tt.want)
+				}
+			}
+
+			{
+				wg := sync.WaitGroup{}
+				wg.Add(2)
+
+				var readConn net.Conn
+				var writeConn net.Conn
+				go func() {
+					conn, _, _ := r1.Accept(tt.args.ChainCoord2)
+					readConn = conn
+					wg.Done()
+				}()
+				go func() {
+					conn, _, _ := r3.Accept(tt.args.ChainCoord2)
+					writeConn = conn
+					wg.Done()
+				}()
+				wg.Wait()
+
+				strChan := make(chan string)
+				go func() {
+					bs := make([]byte, 1024)
+					n, _ := readConn.Read(bs)
+					strChan <- string(bs[:n])
+				}()
+
+				go func() {
+					writeConn.Write([]byte("sendTest"))
+				}()
+
+				result := <-strChan
+
+				if (result == "sendTest") != tt.want {
+					t.Errorf("result = %v, want %v", result, tt.want)
+				}
+			}
+		})
+	}
+}
+
 func Test_router_Connecte_request_to_local(t *testing.T) {
+	var Port = _port
+	_port++
 	type args struct {
 		ChainCoord *common.Coordinate
 		Config1    *Config
@@ -252,7 +400,7 @@ func Test_router_Connecte_request_to_local(t *testing.T) {
 				ChainCoord: &common.Coordinate{},
 				Config1: &Config{
 					Network: "mock:requesttolocal",
-					Port:    3001,
+					Port:    Port,
 					EvilNodeConfig: evilnode.Config{
 						StorePath:    "./test/debug3/",
 						BanEvilScore: 100,
@@ -268,7 +416,7 @@ func Test_router_Connecte_request_to_local(t *testing.T) {
 
 			r1.AddListen(tt.args.ChainCoord)
 
-			err := r1.Request("requesttolocal:3001", tt.args.ChainCoord)
+			err := r1.Request(fmt.Sprintf("requesttolocal:%v", Port), tt.args.ChainCoord)
 
 			if err != tt.wantErr {
 				t.Errorf("err = %v, wantErr %v", err, tt.wantErr)
@@ -331,6 +479,8 @@ func Test_router_Time_store(t *testing.T) {
 }
 
 func Test_EvilScore(t *testing.T) {
+	var Port = _port
+	_port++
 	type args struct {
 		ChainCoord *common.Coordinate
 		Config     *Config
@@ -346,7 +496,7 @@ func Test_EvilScore(t *testing.T) {
 				ChainCoord: &common.Coordinate{},
 				Config: &Config{
 					Network: "mock:evilscore",
-					Port:    3005,
+					Port:    Port,
 					EvilNodeConfig: evilnode.Config{
 						StorePath:    "./test/evilscore/",
 						BanEvilScore: 100,
@@ -360,7 +510,7 @@ func Test_EvilScore(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			os.RemoveAll(tt.args.Config.EvilNodeConfig.StorePath)
 
-			targetAddr := "testaddr:3000"
+			targetAddr := "testaddr:33000"
 			em := evilnode.NewManager(&tt.args.Config.EvilNodeConfig)
 			if em.IsBanNode(targetAddr) {
 				t.Errorf("not expect ban first")
@@ -379,6 +529,8 @@ func Test_EvilScore(t *testing.T) {
 }
 
 func Test_router_UpdateEvilScore(t *testing.T) {
+	var Port = _port
+	_port++
 	type args struct {
 		ChainCoord *common.Coordinate
 		Config1    *Config
@@ -396,7 +548,7 @@ func Test_router_UpdateEvilScore(t *testing.T) {
 				ChainCoord: &common.Coordinate{},
 				Config1: &Config{
 					Network: "mock:evilscore1",
-					Port:    3004,
+					Port:    Port,
 					EvilNodeConfig: evilnode.Config{
 						StorePath:    "./test/evilscore1/",
 						BanEvilScore: 100,
@@ -404,7 +556,7 @@ func Test_router_UpdateEvilScore(t *testing.T) {
 				},
 				Config2: &Config{
 					Network: "mock:evilscore2",
-					Port:    3004,
+					Port:    Port,
 					EvilNodeConfig: evilnode.Config{
 						StorePath:    "./test/evilscore2/",
 						BanEvilScore: 100,
@@ -427,7 +579,7 @@ func Test_router_UpdateEvilScore(t *testing.T) {
 
 			wg := sync.WaitGroup{}
 			wg.Add(2)
-			r2.Request("evilscore1:3004", tt.args.ChainCoord)
+			r2.Request(fmt.Sprintf("evilscore1:%v", Port), tt.args.ChainCoord)
 
 			var readConn net.Conn
 			go func() {
@@ -447,7 +599,7 @@ func Test_router_UpdateEvilScore(t *testing.T) {
 
 			time.Sleep(time.Second * 3)
 
-			err := r1.Request("evilscore2:3004", tt.args.ChainCoord)
+			err := r1.Request(fmt.Sprintf("evilscore2:%v", Port), tt.args.ChainCoord)
 
 			if err != tt.wantErr {
 				t.Errorf("err = %v, wantErr %v", err, tt.wantErr)
@@ -457,7 +609,7 @@ func Test_router_UpdateEvilScore(t *testing.T) {
 
 			acceptChan := make(chan string)
 
-			r2.Request("evilscore1:3004", tt.args.ChainCoord)
+			r2.Request(fmt.Sprintf("evilscore1:%v", Port), tt.args.ChainCoord)
 			go func() {
 				wg.Done()
 				r1.Accept(tt.args.ChainCoord)
@@ -491,6 +643,8 @@ func Test_router_UpdateEvilScore(t *testing.T) {
 }
 
 func Test_Compress(t *testing.T) {
+	var Port = _port
+	_port++
 	type args struct {
 		ChainCoord *common.Coordinate
 		Config1    *Config
@@ -507,7 +661,7 @@ func Test_Compress(t *testing.T) {
 				ChainCoord: &common.Coordinate{},
 				Config1: &Config{
 					Network: "mock:Compress1",
-					Port:    3006,
+					Port:    Port,
 					EvilNodeConfig: evilnode.Config{
 						StorePath:    "./test/Compress1/",
 						BanEvilScore: 100,
@@ -515,7 +669,7 @@ func Test_Compress(t *testing.T) {
 				},
 				Config2: &Config{
 					Network: "mock:Compress2",
-					Port:    3006,
+					Port:    Port,
 					EvilNodeConfig: evilnode.Config{
 						StorePath:    "./test/Compress2/",
 						BanEvilScore: 100,
@@ -533,7 +687,7 @@ func Test_Compress(t *testing.T) {
 			r1.AddListen(tt.args.ChainCoord)
 			r2.AddListen(tt.args.ChainCoord)
 
-			r2.Request("Compress1:3006", tt.args.ChainCoord)
+			r2.Request(fmt.Sprintf("Compress1:%v", Port), tt.args.ChainCoord)
 
 			wg := sync.WaitGroup{}
 			wg.Add(2)
