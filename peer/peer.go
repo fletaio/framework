@@ -19,8 +19,11 @@ type Peer interface {
 	SetPingTime(t time.Duration)
 	ConnectedTime() int64
 	IsClose() bool
+	ID() string
+	NetAddr() string
 }
 
+type onRecv func(p *peer, t message.Type)
 type peer struct {
 	net.Conn
 	pingTime time.Duration
@@ -32,11 +35,12 @@ type peer struct {
 	connectedTime  int64
 	deletePeer     func(addr string)
 
-	writeLock sync.Mutex
+	writeLock    sync.Mutex
+	eventHandler onRecv
 }
 
 //NewPeer is the peer creator.
-func newPeer(conn net.Conn, pingTime time.Duration, mm *message.Manager, deletePeer func(addr string)) Peer {
+func newPeer(conn net.Conn, pingTime time.Duration, mm *message.Manager, deletePeer func(addr string), OnRecvEventHandler onRecv) Peer {
 	p := &peer{
 		Conn:          conn,
 		pingTime:      pingTime,
@@ -44,6 +48,7 @@ func newPeer(conn net.Conn, pingTime time.Duration, mm *message.Manager, deleteP
 		closed:        false,
 		deletePeer:    deletePeer,
 		connectedTime: time.Now().UnixNano(),
+		eventHandler:  OnRecvEventHandler,
 	}
 
 	log.Info("add peer ", pingTime)
@@ -51,6 +56,23 @@ func newPeer(conn net.Conn, pingTime time.Duration, mm *message.Manager, deleteP
 	go p.readPacket()
 
 	return p
+}
+
+func (p *peer) ID() string {
+	return p.NetAddr()
+}
+
+func (p *peer) NetAddr() string {
+	// if addr, ok := p.Conn.RemoteAddr().(*net.TCPAddr); ok { //TCP 로 ip를 바로 획득 가능한경우
+	// 	return addr.IP.String()
+	// }
+
+	// //:으로 나눈 마지막을 port로 취급
+	// addrs := strings.Split(p.Conn.RemoteAddr().String(), ":")
+	// addr := strings.Join(addrs[:len(addrs)-1], ":")
+
+	// return addr
+	return p.Conn.RemoteAddr().String()
 }
 
 func (p *peer) ConnectedTime() int64 {
@@ -75,6 +97,11 @@ func (p *peer) readPacket() {
 		mt := message.ByteToType(BNum)
 		m, h, err := p.mm.ParseMessage(p, mt)
 		if err != nil {
+			if err != message.ErrUnknownMessage {
+				// pass EventHandler
+				p.eventHandler(p, mt)
+				return
+			}
 			log.Error("recv parse message : ", err)
 			return
 		}
@@ -123,7 +150,7 @@ func (p *peer) IsClose() bool {
 //Close is used to break logical connections and delete stored peer data.
 func (p *peer) Close() error {
 	p.closed = true
-	p.deletePeer(p.RemoteAddr().String())
+	p.deletePeer(p.NetAddr())
 	p.Conn.Close()
 
 	return nil

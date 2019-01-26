@@ -2,6 +2,7 @@ package peer
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strconv"
@@ -10,13 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"git.fleta.io/fleta/framework/router/evilnode"
-
 	"git.fleta.io/fleta/common"
 	"git.fleta.io/fleta/framework/log"
 	"git.fleta.io/fleta/framework/message"
 	"git.fleta.io/fleta/framework/peer/peermessage"
 	"git.fleta.io/fleta/framework/router"
+	"git.fleta.io/fleta/framework/router/evilnode"
 )
 
 var (
@@ -116,10 +116,10 @@ func Test_manager_BroadCast(t *testing.T) {
 				}
 				tm.List = map[string]peermessage.ConnectInfo{}
 				func(tm *testMessage) {
-					mm.ApplyMessage(testMessageType, func(r io.Reader) message.Message {
+					mm.ApplyMessage(testMessageType, func(r io.Reader, mt message.Type) (message.Message, error) {
 						tm := &testMessage{}
 						tm.ReadFrom(r)
-						return tm
+						return tm, nil
 					}, func(m message.Message) error {
 						if t, ok := m.(*testMessage); ok {
 							if len(tm.List) == 0 {
@@ -256,10 +256,10 @@ func Test_manager_ExceptCast(t *testing.T) {
 				}
 				tm.List = map[string]peermessage.ConnectInfo{}
 				func(tm *testMessage) {
-					mm.ApplyMessage(testMessageType, func(r io.Reader) message.Message {
+					mm.ApplyMessage(testMessageType, func(r io.Reader, mt message.Type) (message.Message, error) {
 						tm := &testMessage{}
 						tm.ReadFrom(r)
-						return tm
+						return tm, nil
 					}, func(m message.Message) error {
 						if t, ok := m.(*testMessage); ok {
 							if len(tm.List) == 0 {
@@ -402,10 +402,10 @@ func Test_target_cast(t *testing.T) {
 				}
 				tm.List = map[string]peermessage.ConnectInfo{}
 				func(tm *testMessage) {
-					mm.ApplyMessage(testMessageType, func(r io.Reader) message.Message {
+					mm.ApplyMessage(testMessageType, func(r io.Reader, mt message.Type) (message.Message, error) {
 						tm := &testMessage{}
 						tm.ReadFrom(r)
-						return tm
+						return tm, nil
 					}, func(m message.Message) error {
 						if t, ok := m.(*testMessage); ok {
 							tm.From = t.From
@@ -954,10 +954,10 @@ func Test_multi_chain_send(t *testing.T) {
 				}
 				tm.List = map[string]peermessage.ConnectInfo{}
 				func(tm *testMessage) {
-					mm.ApplyMessage(testMessageType, func(r io.Reader) message.Message {
+					mm.ApplyMessage(testMessageType, func(r io.Reader, mt message.Type) (message.Message, error) {
 						tm := &testMessage{}
 						tm.ReadFrom(r)
-						return tm
+						return tm, nil
 					}, func(m message.Message) error {
 						if t, ok := m.(*testMessage); ok {
 							if len(tm.List) == 0 {
@@ -1031,6 +1031,46 @@ func Test_multi_chain_send(t *testing.T) {
 			if tmR1C2.From != tmR2C2.From {
 				t.Errorf("except tmR1C2.From is equal with tmR2C2.From but tmR1C2.From is '%v' and tmR2C2.From is '%v'", tmR1C2.From, tmR2C2.From)
 				return
+			}
+
+		})
+	}
+}
+
+func TestNewByTime(t *testing.T) {
+	type args struct {
+		list    []int64
+		timeout time.Duration
+	}
+	tests := []struct {
+		name string
+		args args
+		want []bool
+	}{
+		{name: "test1", args: args{list: []int64{1, 45, 2, 789, 3, 6, 65}, timeout: time.Second * 3}, want: []bool{false, true, false, true, false, true, true}},
+		{name: "test2", args: args{list: []int64{1}, timeout: time.Second * 0}, want: []bool{true}},
+		{name: "test2", args: args{list: []int64{1, 2}, timeout: time.Second * 1}, want: []bool{false, true}},
+		{
+			name: "test3",
+			args: args{
+				list:    []int64{1, 45, 1, 789, 1, 3, 65, 3, 3, 3, 3, 3, 4},
+				timeout: (time.Second * 3) + (time.Millisecond * 500),
+			},
+			want: []bool{false, true, false, true, false, false, true, false, false, false, false, false, true},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := NewByTime()
+			for i, v := range tt.args.list {
+				b.Add(fmt.Sprintf("%v", i), v)
+			}
+			time.Sleep(tt.args.timeout)
+			for i, w := range tt.want {
+				key := fmt.Sprintf("%v", i)
+				if got := b.IsBan(key); w != got {
+					t.Errorf("i = %v isBan = %v, overTime = %v want %v", key, got, b.Map[key].OverTime, w)
+				}
 			}
 
 		})
