@@ -101,7 +101,7 @@ func (cn *Chain) Screening(cd *Data) error {
 }
 
 // Process procceses the data and appends the data to the chain
-func (cn *Chain) Process(cd *Data) error {
+func (cn *Chain) Process(cd *Data, UserData interface{}) error {
 	cn.closeLock.RLock()
 	defer cn.closeLock.RUnlock()
 	if cn.isClose {
@@ -140,8 +140,29 @@ func (cn *Chain) Process(cd *Data) error {
 	if !BodyHash.Equal(cd.Header.BodyHash) {
 		return ErrInvalidBodyHash
 	}
-	if err := cn.handler.OnProcess(cd); err != nil {
+	if err := cn.handler.OnProcess(cd, UserData); err != nil {
 		return err
 	}
 	return nil
+}
+
+// Generate generates and returns the next data
+func (cn *Chain) Generate() (*Data, error) {
+	cn.closeLock.RLock()
+	defer cn.closeLock.RUnlock()
+	if cn.isClose {
+		return nil, ErrChainClosed
+	}
+
+	cd, UserData, err := cn.handler.OnGenerate()
+	if err != nil {
+		return nil, err
+	} else if cd == nil {
+		return nil, nil
+	}
+
+	if err := cn.Process(cd, UserData); err != nil {
+		return nil, err
+	}
+	return cd, nil
 }

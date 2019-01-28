@@ -40,6 +40,7 @@ type Manager struct {
 	manager      *message.Manager
 	statusMap    map[string]*Status
 	processLock  sync.Mutex
+	generateLock sync.Mutex
 	requestLock  sync.Mutex
 	requestTimer *RequestTimer
 }
@@ -210,10 +211,22 @@ func (cm *Manager) Run() {
 		case <-timer.C:
 			height := cp.Height()
 			cm.tryRequestData(height, DataFetchHeightDiffMax)
+			cm.TryGenerate()
 			timer.Reset(10 * time.Second)
 		}
 	}
-	// TODO : request data using status and pulling manager
+}
+
+func (cm *Manager) TryGenerate() {
+	cm.generateLock.Lock()
+	defer cm.generateLock.Unlock()
+
+	if cd, err := cm.chain.Generate(); err != nil {
+		log.Println(err)
+	} else if cd != nil {
+		cm.broadcastHeader(&cd.Header)
+		go cm.TryGenerate()
+	}
 }
 
 func (cm *Manager) tryProcess() {
@@ -223,7 +236,7 @@ func (cm *Manager) tryProcess() {
 	cp := cm.chain.Provider()
 	item := cm.pool.Pop(cp.Height() + 1)
 	for item != nil {
-		if err := cm.chain.Process(item); err != nil {
+		if err := cm.chain.Process(item, nil); err != nil {
 			log.Println(err)
 		} else {
 			cm.broadcastHeader(&item.Header)
