@@ -74,11 +74,13 @@ func Warnf(s string, v ...interface{}) {
 // Error logs an error log entry
 func Error(v ...interface{}) {
 	v = append([]interface{}{"ERROR "}, v...)
-	log.Println(v)
+	Msg(v...)
+	// log.Println(v)
 }
 
 // Errorf logs an error log entry with formatting
 func Errorf(s string, v ...interface{}) {
 	s = "ERROR " + s
-	log.Printf(s, v)
+	Msgf(s, v...)
+	// log.Printf(s, v)
 }

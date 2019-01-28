@@ -2,7 +2,9 @@ package peer
 
 import (
 	"errors"
+	"fmt"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -59,6 +61,7 @@ type manager struct {
 
 	eventHandlerLock sync.Mutex
 	eventHandler     []EventHandler
+	BanPeerInfos     *ByTime
 }
 
 type candidateState int
@@ -71,7 +74,7 @@ const (
 
 //NewManager is the peerManager creator.
 //Apply messages necessary for peer management.
-func NewManager(ChainCoord *common.Coordinate, r router.Router, mm *message.Manager, Config *Config) (Manager, error) {
+func NewManager(ChainCoord *common.Coordinate, r router.Router, mm *message.Manager, Config *Config) (*manager, error) {
 	ns, err := newNodeStore(Config.StorePath)
 	if err != nil {
 		return nil, err
@@ -85,6 +88,7 @@ func NewManager(ChainCoord *common.Coordinate, r router.Router, mm *message.Mana
 		candidates:   candidateMap{},
 		connections:  connectMap{},
 		eventHandler: []EventHandler{},
+		BanPeerInfos: NewByTime(),
 	}
 	pm.peerStorage = storage.NewPeerStorage(pm.kickOutPeerStorage)
 
@@ -106,18 +110,50 @@ func (pm *manager) StartManage() {
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
-		defer func() {
-			log.Debug("StartManage go func() end")
-		}()
 		wg.Done()
 		for {
 			conn, pingTime, err := pm.router.Accept(pm.ChainCoord)
 			if err != nil {
 				continue
 			}
+
+			// ban check
+			addr := conn.RemoteAddr().String()
+			if pm.BanPeerInfos.IsBan(addr) {
+				if hp, has := pm.connections.Load(addr); has {
+					hp.Close()
+				}
+				conn.Close()
+				continue
+			}
+
 			go func(conn net.Conn) {
-				peer := newPeer(conn, pingTime, pm.mm, pm.deletePeer)
-				pm.addPeer(peer)
+				peer := newPeer(conn, pingTime, pm.mm, pm.deletePeer, pm.onRecvEventHandler)
+				pm.eventHandlerLock.Lock()
+				var err error
+				for _, eh := range pm.eventHandler {
+					err = eh.BeforeConnect(peer)
+					if err != nil {
+						break
+					}
+				}
+				pm.eventHandlerLock.Unlock()
+				if err != nil {
+					log.Error("StartManage BeforeConnect event err ", err)
+					peer.Close()
+					return
+				}
+				err = pm.addPeer(peer)
+				if err != nil {
+					log.Error("StartManage addPeer err ", err)
+					return
+				}
+				pm.eventHandlerLock.Lock()
+				for _, eh := range pm.eventHandler {
+					eh.AfterConnect(peer)
+				}
+				pm.eventHandlerLock.Unlock()
+
 			}(conn)
 		}
 	}()
@@ -127,6 +163,19 @@ func (pm *manager) StartManage() {
 
 	go pm.manageCandidate()
 	go pm.rotatePeer()
+}
+
+func (pm *manager) onRecvEventHandler(p *peer, t message.Type) {
+	pm.eventHandlerLock.Lock()
+	for _, eh := range pm.eventHandler {
+		err := eh.OnRecv(p, t, p)
+		if err == nil {
+			break
+		}
+		//TODO IF NOT EXIST MESSAGE TYPE ERROR THAN CONTINUE
+	}
+	pm.eventHandlerLock.Unlock()
+
 }
 
 // EnforceConnect handles all of the Request standby nodes in the cardidate.
@@ -270,10 +319,10 @@ func (pm *manager) peerListHandler(m message.Message) error {
 }
 
 func (pm *manager) updateScoreBoard(p Peer, ci peermessage.ConnectInfo) {
-	addr := p.RemoteAddr().String()
+	addr := p.NetAddr()
 
 	node := pm.nodes.LoadOrStore(addr, peermessage.NewConnectInfo(addr, p.PingTime()))
-	node.PingScoreBoard.Store(ci.Address, ci.PingTime, p.LocalAddr().String()+" "+p.RemoteAddr().String()+" ")
+	node.PingScoreBoard.Store(ci.Address, ci.PingTime, p.LocalAddr().String()+" "+p.NetAddr()+" ")
 }
 
 func (pm *manager) doManageCandidate(addr string, cs candidateState) error {
@@ -371,36 +420,31 @@ func (pm *manager) deletePeer(addr string) {
 	pm.eventHandlerLock.Lock()
 	if p, has := pm.connections.Load(addr); has {
 		for _, eh := range pm.eventHandler {
-			eh.PeerDisconnected(p)
+			eh.OnClosed(p)
 		}
 	}
 	pm.eventHandlerLock.Unlock()
 	pm.connections.Delete(addr)
 }
 
-func (pm *manager) addPeer(p Peer) {
+func (pm *manager) addPeer(p Peer) error {
 	pm.peerGroupLock.Lock()
 	defer pm.peerGroupLock.Unlock()
 
-	if _, has := pm.connections.Load(p.RemoteAddr().String()); has {
-		log.Debug("close peer2 ", p.LocalAddr(), " ", p.RemoteAddr())
+	if _, has := pm.connections.Load(p.NetAddr()); has {
 		p.Close()
+		return ErrIsAlreadyConnected
 	} else {
-		addr := p.RemoteAddr().String()
+		addr := p.NetAddr() // .RemoteAddr().String()
 		pm.connections.Store(addr, p)
 		pm.nodes.Store(addr, peermessage.NewConnectInfo(addr, p.PingTime()))
 		pm.candidates.store(addr, csPeerListWait)
-
-		pm.eventHandlerLock.Lock()
-		for _, eh := range pm.eventHandler {
-			eh.PeerConnected(p)
-		}
-		pm.eventHandlerLock.Unlock()
 
 		go func(p Peer) {
 			peermessage.SendRequestPeerList(p, p.LocalAddr().String())
 		}(p)
 	}
+	return nil
 }
 
 func (pm *manager) addReadyConn(p Peer) {
@@ -411,4 +455,142 @@ func (pm *manager) addReadyConn(p Peer) {
 		return 0, false
 	})
 
+}
+
+/***
+ * implament of mage interface
+**/
+// AddNode is used to register additional peers from outside.
+func (pm *manager) Add(netAddr string, doForce bool) {
+	err := pm.router.Request(netAddr, pm.ChainCoord)
+	pm.candidates.store(netAddr, csPunishableRequestWait)
+	if err != nil {
+		log.Error("RequestWait err ", err)
+	}
+}
+
+func (pm *manager) Remove(netAddr string) {
+	p, has := pm.connections.Load(netAddr)
+	if has {
+		p.Close()
+	}
+}
+func (pm *manager) RemoveByID(ID string) {
+	pm.Remove(ID)
+}
+
+type BanPeerInfo struct {
+	NetAddr  string
+	Timeout  int64
+	OverTime int64
+}
+
+func (p BanPeerInfo) String() string {
+	return fmt.Sprintf("%s Ban over %d", p.NetAddr, p.OverTime)
+}
+
+// ByTime implements sort.Interface for []Person BanPeerInfo on
+// the Timeout field.
+type ByTime struct {
+	Arr []*BanPeerInfo
+	Map map[string]*BanPeerInfo
+}
+
+func NewByTime() *ByTime {
+	return &ByTime{
+		Arr: []*BanPeerInfo{},
+		Map: map[string]*BanPeerInfo{},
+	}
+}
+
+func (a *ByTime) Len() int           { return len(a.Arr) }
+func (a *ByTime) Swap(i, j int)      { a.Arr[i], a.Arr[j] = a.Arr[j], a.Arr[i] }
+func (a *ByTime) Less(i, j int) bool { return a.Arr[i].Timeout < a.Arr[j].Timeout }
+
+func (a *ByTime) Add(netAddr string, Seconds int64) {
+	b, has := a.Map[netAddr]
+	if !has {
+		b = &BanPeerInfo{
+			NetAddr:  netAddr,
+			Timeout:  time.Now().UnixNano() + (int64(time.Second) * Seconds),
+			OverTime: Seconds,
+		}
+		a.Arr = append(a.Arr, b)
+		a.Map[netAddr] = b
+	} else {
+		b.Timeout = Seconds
+	}
+	sort.Sort(a)
+}
+
+func (a *ByTime) Delete(netAddr string) {
+	i := a.Search(netAddr)
+	if i < 0 {
+		return
+	}
+
+	b := a.Arr[i]
+	a.Arr = append(a.Arr[:i], a.Arr[i+1:]...)
+	delete(a.Map, b.NetAddr)
+}
+
+func (a *ByTime) Search(netAddr string) int {
+	b, has := a.Map[netAddr]
+	if !has {
+		return -1
+	}
+
+	i, j := 0, len(a.Arr)
+	for i < j {
+		h := int(uint(i+j) >> 1) // avoid overflow when computing h
+		// i ≤ h < j
+		if !(a.Arr[h].Timeout >= b.Timeout) {
+			i = h + 1 // preserves f(i-1) == false
+		} else {
+			j = h // preserves f(j) == true
+		}
+	}
+	// i == j, f(i-1) == false, and f(j) (= f(i)) == true  =>  answer is i.
+	return i
+}
+
+func (a *ByTime) IsBan(netAddr string) bool {
+	now := time.Now().UnixNano()
+	var slicePivot = 0
+	for i, b := range a.Arr {
+		if now < b.Timeout {
+			slicePivot = i
+			break
+		}
+		delete(a.Map, a.Arr[i].NetAddr)
+	}
+
+	a.Arr = a.Arr[slicePivot:]
+	_, has := a.Map[netAddr]
+	return has
+}
+
+func (pm *manager) Ban(netAddr string, Seconds uint32) {
+	pm.BanPeerInfos.Add(netAddr, int64(Seconds))
+	p, has := pm.connections.Load(netAddr)
+	if has {
+		p.Close()
+	}
+}
+
+func (pm *manager) BanByID(ID string, Seconds uint32) {
+	pm.Ban(ID, Seconds)
+}
+
+func (pm *manager) Unban(netAddr string) {
+	pm.BanPeerInfos.Delete(netAddr)
+}
+
+func (pm *manager) Peers() []Peer {
+	list := make([]Peer, 0)
+	pm.connections.Range(func(addr string, p Peer) bool {
+		list = append(list, p)
+		return true
+	})
+	return list
 }

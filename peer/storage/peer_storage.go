@@ -212,7 +212,7 @@ func (ps *peerStorage) updatePingtime(addr string) {
 }
 
 func (ps *peerStorage) insertSort(p *peerInfomation) bool {
-	// 자기 그룹부터 시작 ex) 3인경우 3 -> 2 -> 1, 2인경우 2 -> 3 -> 1
+	// 자기 그룹부터 시작 ex) 3인경우 3 -> 2 -> 1, 2인경우 2 -> 3 -> 1, 1인경우 1 -> 2-> 3
 	if p.group <= group1 && ps.insert(p, group1) {
 	} else if p.group <= group2 && ps.insert(p, group2) {
 	} else if p.group <= group3 && ps.insert(p, group3) {
