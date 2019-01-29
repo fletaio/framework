@@ -2,6 +2,7 @@ package peer
 
 import (
 	"bytes"
+	"encoding/binary"
 	"io"
 	"net"
 	"sync"
@@ -14,7 +15,7 @@ import (
 //Peer is manages connections between nodes that cause logical connections.
 type Peer interface {
 	net.Conn
-	Send(m message.Message)
+	Send(m message.Message) error
 	PingTime() time.Duration
 	SetPingTime(t time.Duration)
 	ConnectedTime() int64
@@ -23,35 +24,31 @@ type Peer interface {
 	NetAddr() string
 }
 
-type onRecv func(p *peer, t message.Type)
+type onRecv func(p *peer, t message.Type) error
 type peer struct {
 	net.Conn
 	pingTime time.Duration
 	score    int64
-	mm       *message.Manager
 	closed   bool
 
 	registeredTime int64
 	connectedTime  int64
 	deletePeer     func(addr string)
 
-	writeLock    sync.Mutex
-	eventHandler onRecv
+	writeLock          sync.Mutex
+	onRecvEventHandler onRecv
 }
 
 //NewPeer is the peer creator.
-func newPeer(conn net.Conn, pingTime time.Duration, mm *message.Manager, deletePeer func(addr string), OnRecvEventHandler onRecv) Peer {
+func newPeer(conn net.Conn, pingTime time.Duration, deletePeer func(addr string), OnRecvEventHandler onRecv) Peer {
 	p := &peer{
-		Conn:          conn,
-		pingTime:      pingTime,
-		mm:            mm,
-		closed:        false,
-		deletePeer:    deletePeer,
-		connectedTime: time.Now().UnixNano(),
-		eventHandler:  OnRecvEventHandler,
+		Conn:               conn,
+		pingTime:           pingTime,
+		closed:             false,
+		deletePeer:         deletePeer,
+		connectedTime:      time.Now().UnixNano(),
+		onRecvEventHandler: OnRecvEventHandler,
 	}
-
-	log.Info("add peer ", pingTime)
 
 	go p.readPacket()
 
@@ -94,37 +91,39 @@ func (p *peer) readPacket() {
 			return
 		}
 
-		mt := message.ByteToType(BNum)
-		m, h, err := p.mm.ParseMessage(p, mt)
+		t := binary.BigEndian.Uint64(BNum)
+		mt := message.Type(t)
+
+		err = p.onRecvEventHandler(p, mt)
 		if err != nil {
-			if err != message.ErrUnknownMessage {
-				// pass EventHandler
-				p.eventHandler(p, mt)
-				return
-			}
-			log.Error("recv parse message : ", err)
-			return
-		}
-		if err := h(m); err != nil {
-			log.Error("recv handle message : ", err)
-			return
+			log.Error("onRecv error : ", err)
 		}
 	}
 }
 
 //Send conveys a message to the connected node.
-func (p *peer) Send(m message.Message) {
+func (p *peer) Send(m message.Message) error {
 	p.writeLock.Lock()
 	defer p.writeLock.Unlock()
 
 	mt := m.Type()
 
 	bf := bytes.Buffer{}
-	bf.Write(message.TypeToByte(mt))
-	m.WriteTo(&bf)
+	_, err := bf.Write(message.TypeToByte(mt))
+	if err != nil {
+		return err
+	}
+	_, err = m.WriteTo(&bf)
+	if err != nil {
+		return err
+	}
 
 	bs := bf.Bytes()
-	p.Write(bs)
+	_, err = p.Write(bs)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 //PingTime return pingTime

@@ -93,11 +93,11 @@ func (pc *physicalConnection) run() error {
 				log.Error("physicalConnection end ", err)
 			}
 			pc.Close()
-			log.Debug("physicalConnection run end ", pc.localhost, " ", pc.PConn.RemoteAddr().String())
+			log.Debug("physicalConnection run end ", pc.PConn.LocalAddr().String(), " ", pc.PConn.RemoteAddr().String())
 			return err
 		}
 		if isHandshake { // handshake
-			log.Debug("response handshake ", body[0], " ", pc.localhost, " ", pc.PConn.RemoteAddr().String())
+			log.Debug("response handshake ", body[0], " ", pc.PConn.LocalAddr().String(), " ", pc.PConn.RemoteAddr().String())
 			if body[0] == FORONE {
 				if len(body) > 17 {
 					if uuid, err := uuid.FromBytes(body[1:17]); err != nil {
@@ -117,8 +117,9 @@ func (pc *physicalConnection) run() error {
 									continue
 								}
 							}
+						} else {
+							log.Error("no time map ", uuid.String())
 						}
-						log.Error("no time map ", uuid.String())
 						pc.handshake(ChainCoord)
 
 					}

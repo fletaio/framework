@@ -3,13 +3,16 @@ package peer
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"git.fleta.io/fleta/framework/chain/mesh"
 	"git.fleta.io/fleta/framework/router/evilnode"
 
 	"git.fleta.io/fleta/common"
@@ -32,7 +35,7 @@ var (
 
 //Manager manages peer-connected networks.
 type Manager interface {
-	RegisterEventHandler(eh EventHandler)
+	RegisterEventHandler(eh mesh.EventHandler)
 	StartManage()
 	EnforceConnect()
 	AddNode(addr string) error
@@ -44,11 +47,11 @@ type Manager interface {
 }
 
 type manager struct {
-	Config     *Config
-	ChainCoord *common.Coordinate
-	router     router.Router
-	mm         *message.Manager
-	onReady    func(p *peer)
+	Config         *Config
+	ChainCoord     *common.Coordinate
+	router         router.Router
+	MessageManager *message.Manager
+	onReady        func(p *peer)
 
 	nodes           *nodeStore
 	nodeRotateIndex int
@@ -57,10 +60,12 @@ type manager struct {
 	peerGroupLock sync.Mutex
 	connections   connectMap
 
-	peerStorage storage.IPeerStorage
+	peerStorage storage.PeerStorage
 
-	eventHandlerLock sync.Mutex
-	eventHandler     []EventHandler
+	BaseEventHandler
+
+	eventHandlerLock sync.RWMutex
+	eventHandler     []mesh.EventHandler
 	BanPeerInfos     *ByTime
 }
 
@@ -74,32 +79,50 @@ const (
 
 //NewManager is the peerManager creator.
 //Apply messages necessary for peer management.
-func NewManager(ChainCoord *common.Coordinate, r router.Router, mm *message.Manager, Config *Config) (*manager, error) {
+func NewManager(ChainCoord *common.Coordinate, r router.Router, Config *Config) (*manager, error) {
 	ns, err := newNodeStore(Config.StorePath)
 	if err != nil {
 		return nil, err
 	}
 	pm := &manager{
-		Config:       Config,
-		ChainCoord:   ChainCoord,
-		router:       r,
-		mm:           mm,
-		nodes:        ns,
-		candidates:   candidateMap{},
-		connections:  connectMap{},
-		eventHandler: []EventHandler{},
-		BanPeerInfos: NewByTime(),
+		Config:         Config,
+		ChainCoord:     ChainCoord,
+		router:         r,
+		MessageManager: message.NewManager(),
+		nodes:          ns,
+		candidates:     candidateMap{},
+		connections:    connectMap{},
+		eventHandler:   []mesh.EventHandler{},
+		BanPeerInfos:   NewByTime(),
 	}
 	pm.peerStorage = storage.NewPeerStorage(pm.kickOutPeerStorage)
 
 	//add requestPeerList message
-	mm.ApplyMessage(peermessage.PeerListMessageType, peermessage.PeerListCreator, pm.peerListHandler)
+	pm.MessageManager.SetCreator(peermessage.PeerListMessageType, peermessage.PeerListCreator)
+	// mm.ApplyMessage(peermessage.PeerListMessageType, peermessage.PeerListCreator, pm.peerListHandler)
+
+	pm.RegisterEventHandler(pm)
 
 	return pm, nil
 }
 
+func (pm *manager) errLog(msg ...interface{}) {
+	var file string
+	var line int
+	{
+		pc := make([]uintptr, 10) // at least 1 entry needed
+		runtime.Callers(2, pc)
+		f := runtime.FuncForPC(pc[0])
+		file, line = f.FileLine(pc[0])
+
+		path := strings.Split(file, "/")
+		file = strings.Join(path[len(path)-3:], "/")
+	}
+	log.Error(append([]interface{}{file, " ", line, " ", pm.router.Conf().Network, " "}, msg...)...)
+}
+
 //RegisterEventHandler is Registered event handler
-func (pm *manager) RegisterEventHandler(eh EventHandler) {
+func (pm *manager) RegisterEventHandler(eh mesh.EventHandler) {
 	pm.eventHandlerLock.Lock()
 	pm.eventHandler = append(pm.eventHandler, eh)
 	pm.eventHandlerLock.Unlock()
@@ -114,6 +137,7 @@ func (pm *manager) StartManage() {
 		for {
 			conn, pingTime, err := pm.router.Accept(pm.ChainCoord)
 			if err != nil {
+				pm.errLog(err, conn.RemoteAddr().String())
 				continue
 			}
 
@@ -124,35 +148,37 @@ func (pm *manager) StartManage() {
 					hp.Close()
 				}
 				conn.Close()
+				pm.errLog("BanPeerInfos.IsBan(addr) ", addr)
 				continue
 			}
 
 			go func(conn net.Conn) {
-				peer := newPeer(conn, pingTime, pm.mm, pm.deletePeer, pm.onRecvEventHandler)
-				pm.eventHandlerLock.Lock()
+				peer := newPeer(conn, pingTime, pm.deletePeer, pm.onRecvEventHandler)
+				pm.eventHandlerLock.RLock()
 				var err error
 				for _, eh := range pm.eventHandler {
 					err = eh.BeforeConnect(peer)
 					if err != nil {
+						pm.errLog("BeforeConnect(peer) err ", err)
 						break
 					}
 				}
-				pm.eventHandlerLock.Unlock()
+				pm.eventHandlerLock.RUnlock()
 				if err != nil {
-					log.Error("StartManage BeforeConnect event err ", err)
+					pm.errLog("StartManage BeforeConnect event err ", err)
 					peer.Close()
 					return
 				}
 				err = pm.addPeer(peer)
 				if err != nil {
-					log.Error("StartManage addPeer err ", err)
+					pm.errLog("StartManage addPeer err ", err)
 					return
 				}
-				pm.eventHandlerLock.Lock()
+				pm.eventHandlerLock.RLock()
 				for _, eh := range pm.eventHandler {
 					eh.AfterConnect(peer)
 				}
-				pm.eventHandlerLock.Unlock()
+				pm.eventHandlerLock.RUnlock()
 
 			}(conn)
 		}
@@ -165,17 +191,23 @@ func (pm *manager) StartManage() {
 	go pm.rotatePeer()
 }
 
-func (pm *manager) onRecvEventHandler(p *peer, t message.Type) {
-	pm.eventHandlerLock.Lock()
+func (pm *manager) onRecvEventHandler(p *peer, t message.Type) error {
+	pm.eventHandlerLock.RLock()
+	defer pm.eventHandlerLock.RUnlock()
 	for _, eh := range pm.eventHandler {
 		err := eh.OnRecv(p, t, p)
-		if err == nil {
-			break
+		if err != nil {
+			if err == message.ErrUnknownMessage {
+				pm.errLog("onRecvEventHandler message.ErrUnknownMessage local ", p.LocalAddr().String(), "remote", p.RemoteAddr().String())
+				continue
+			}
+			pm.errLog("onRecvEventHandler ", err, " local ", p.LocalAddr().String(), "remote", p.RemoteAddr().String())
+			return err
 		}
-		//TODO IF NOT EXIST MESSAGE TYPE ERROR THAN CONTINUE
+		break
 	}
-	pm.eventHandlerLock.Unlock()
 
+	return nil
 }
 
 // EnforceConnect handles all of the Request standby nodes in the cardidate.
@@ -190,7 +222,7 @@ func (pm *manager) EnforceConnect() {
 	for _, addr := range dialList {
 		err := pm.router.Request(addr, pm.ChainCoord)
 		if err != nil {
-			log.Error("EnforceConnect error ", err)
+			pm.errLog("EnforceConnect error ", err)
 		}
 		time.Sleep(time.Millisecond * 50)
 	}
@@ -207,6 +239,7 @@ func (pm *manager) AddNode(addr string) error {
 		go pm.doManageCandidate(addr, csRequestWait)
 		log.Debug("AddNode ", pm.router.Localhost(), addr)
 	} else {
+		pm.errLog("AddNode router.ErrCanNotConnectToEvilNode", addr)
 		return router.ErrCanNotConnectToEvilNode
 	}
 	return nil
@@ -264,8 +297,17 @@ func (pm *manager) GroupList() []string {
 	return pm.peerStorage.List()
 }
 
-func (pm *manager) peerListHandler(m message.Message) error {
-	if peerList, ok := m.(*peermessage.PeerList); ok {
+// func (pm *manager) peerListHandler(m message.Message) error {
+func (pm *manager) OnRecv(p mesh.Peer, t message.Type, r io.Reader) error {
+	m, err := pm.MessageManager.ParseMessage(r, t)
+	if err != nil {
+		pm.errLog(err, p.ID())
+		return err
+	}
+
+	switch m.(type) {
+	case *peermessage.PeerList:
+		peerList := m.(*peermessage.PeerList)
 		if peerList.Request == true {
 			peerList.Request = false
 			nodeMap := make(map[string]peermessage.ConnectInfo)
@@ -315,6 +357,7 @@ func (pm *manager) peerListHandler(m message.Message) error {
 		}
 
 	}
+
 	return nil
 }
 
@@ -333,15 +376,16 @@ func (pm *manager) doManageCandidate(addr string, cs candidateState) error {
 	switch cs {
 	case csRequestWait:
 		err = pm.router.Request(addr, pm.ChainCoord)
+		log.Debug(pm.router.Conf().Network, addr)
 		go pm.candidates.store(addr, csPunishableRequestWait)
 		if err != nil {
-			log.Error("RequestWait err ", err)
+			pm.errLog("RequestWait err ", err)
 		}
 	case csPunishableRequestWait:
 		err = pm.router.Request(addr, pm.ChainCoord)
 		if err != nil {
 			pm.router.EvilNodeManager().TellOn(addr, evilnode.DialFail)
-			log.Error("RequestWait2 err ", err)
+			pm.errLog("TellOn ", err)
 		}
 	case csPeerListWait:
 		if p, has := pm.connections.Load(addr); has {
@@ -377,6 +421,18 @@ func (pm *manager) rotatePeer() {
 }
 
 func (pm *manager) appendPeerStorage() {
+	if pm.connections.Len() == 0 {
+		return
+	}
+
+	if pm.connections.Len() == 1 {
+		pm.connections.Range(func(k string, p Peer) bool {
+			log.Info("send request list ", p.LocalAddr().String(), " to ", p.RemoteAddr().String())
+			peermessage.SendRequestPeerList(p, p.LocalAddr().String())
+			return false
+		})
+	}
+
 	for i := pm.nodeRotateIndex; i < pm.nodes.Len(); i++ {
 		p := pm.nodes.Get(i)
 		pm.nodeRotateIndex = i + 1
@@ -388,7 +444,7 @@ func (pm *manager) appendPeerStorage() {
 		} else {
 			err := pm.router.Request(p.Address, pm.ChainCoord)
 			if err != nil {
-				log.Error("PeerListHandler err ", err)
+				pm.errLog("PeerListHandler err ", err)
 			}
 		}
 
@@ -399,7 +455,7 @@ func (pm *manager) appendPeerStorage() {
 	}
 }
 
-func (pm *manager) kickOutPeerStorage(ip storage.IPeer) {
+func (pm *manager) kickOutPeerStorage(ip storage.Peer) {
 	if p, ok := ip.(Peer); ok {
 		if pm.connections.Len() > storage.MaxPeerStorageLen()*2 {
 			closePeer := p
@@ -417,27 +473,30 @@ func (pm *manager) kickOutPeerStorage(ip storage.IPeer) {
 }
 
 func (pm *manager) deletePeer(addr string) {
-	pm.eventHandlerLock.Lock()
+	pm.eventHandlerLock.RLock()
 	if p, has := pm.connections.Load(addr); has {
 		for _, eh := range pm.eventHandler {
 			eh.OnClosed(p)
 		}
 	}
-	pm.eventHandlerLock.Unlock()
+	pm.eventHandlerLock.RUnlock()
 	pm.connections.Delete(addr)
 }
 
 func (pm *manager) addPeer(p Peer) error {
+	pm.errLog("addPeer ", p.RemoteAddr().String())
 	pm.peerGroupLock.Lock()
 	defer pm.peerGroupLock.Unlock()
 
 	if _, has := pm.connections.Load(p.NetAddr()); has {
 		p.Close()
+		pm.errLog("addPeer, ", ErrIsAlreadyConnected, p.RemoteAddr().String())
 		return ErrIsAlreadyConnected
 	} else {
 		addr := p.NetAddr() // .RemoteAddr().String()
 		pm.connections.Store(addr, p)
 		pm.nodes.Store(addr, peermessage.NewConnectInfo(addr, p.PingTime()))
+		pm.errLog("nodes.Store, ", addr)
 		pm.candidates.store(addr, csPeerListWait)
 
 		go func(p Peer) {
@@ -465,7 +524,7 @@ func (pm *manager) Add(netAddr string, doForce bool) {
 	err := pm.router.Request(netAddr, pm.ChainCoord)
 	pm.candidates.store(netAddr, csPunishableRequestWait)
 	if err != nil {
-		log.Error("RequestWait err ", err)
+		pm.errLog("RequestWait err ", err, netAddr)
 	}
 }
 

@@ -91,9 +91,8 @@ func (r *Manager) IsBanNode(addr string) bool {
 		evilScore = pi.EvilScore - uint16(passedSecond)
 	}
 
-	log.Info("IsBanNode func evilScore : ", addr, " : ", evilScore, passedSecond)
-
 	if evilScore > r.Config.BanEvilScore {
+		log.Info("IsBanNode func evilScore : ", addr, " : ", evilScore, passedSecond)
 		return true
 	}
 	return false

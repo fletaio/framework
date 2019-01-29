@@ -59,16 +59,16 @@ type peerStorage struct {
 	kickOut   kickOut
 }
 
-// IPeerStorage is a list of functions to be exposed to external sources.
-type IPeerStorage interface {
-	Add(peer IPeer, scoreFunc Score) bool
+// PeerStorage is a list of functions to be exposed to external sources.
+type PeerStorage interface {
+	Add(peer Peer, scoreFunc Score) bool
 	List() []string
 	Have(addr string) bool
 	NotEnoughPeer() bool
 }
 
-// IPeer is a functional list of Peer structures to be used internally.
-type IPeer interface {
+// Peer is a functional list of Peer structures to be used internally.
+type Peer interface {
 	RemoteAddr() net.Addr
 	LocalAddr() net.Addr
 	PingTime() time.Duration
@@ -79,10 +79,10 @@ type IPeer interface {
 type Score func(string) (time.Duration, bool)
 
 // KickOut is a function called when a peer is not needed.
-type kickOut func(p IPeer)
+type kickOut func(p Peer)
 
 //NewPeerStorage is the PeerStorage creator.
-func NewPeerStorage(kickOut kickOut) IPeerStorage {
+func NewPeerStorage(kickOut kickOut) PeerStorage {
 	ps := &peerStorage{
 		peerGroup: map[peerGroupType]nodeList{},
 		peerMap:   map[string]*peerInfomation{},
@@ -97,7 +97,7 @@ func NewPeerStorage(kickOut kickOut) IPeerStorage {
 }
 
 type peerInfomation struct {
-	p              IPeer
+	p              Peer
 	advantage      *scoreBoard
 	registeredTime time.Time
 	group          peerGroupType
@@ -120,7 +120,7 @@ func (p *peerInfomation) score() (t time.Duration) {
 
 //Add a new peer
 //Scores the peer and determines whether it is included in the group.
-func (ps *peerStorage) Add(p IPeer, score Score) (inserted bool) {
+func (ps *peerStorage) Add(p Peer, score Score) (inserted bool) {
 	addr := p.RemoteAddr().String()
 	t := p.PingTime()
 
