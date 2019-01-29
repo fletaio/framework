@@ -10,7 +10,6 @@ type EventHandler interface {
 	OnScreening(cd *Data) error
 	OnCheckFork(ch *Header, sigs []common.Signature) error
 	OnProcess(cd *Data, UserData interface{}) error
-	OnGenerate() (*Data, interface{}, error)
 	Provider() Provider
 	OnClose()
 }

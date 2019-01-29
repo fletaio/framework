@@ -34,6 +34,7 @@ type Manager struct {
 	sync.Mutex
 	Mesh      mesh.Mesh
 	Deligator RecvDeligator
+	Generator chain.Generator
 
 	chain        *chain.Chain
 	pool         *Pool
@@ -211,23 +212,34 @@ func (cm *Manager) Run() {
 		case <-timer.C:
 			height := cp.Height()
 			cm.tryRequestData(height, DataFetchHeightDiffMax)
-			cm.TryGenerate()
+			go cm.Generate()
 			timer.Reset(10 * time.Second)
 		}
 	}
 }
 
-// TryGenerate try to next block of the chain
-func (cm *Manager) TryGenerate() {
+// Generate generates to next block of the chain
+func (cm *Manager) Generate() (*chain.Data, error) {
+	if cm.Generator == nil {
+		return nil, nil
+	}
+
 	cm.generateLock.Lock()
 	defer cm.generateLock.Unlock()
 
-	if cd, err := cm.chain.Generate(); err != nil {
-		log.Println(err)
-	} else if cd != nil {
-		cm.broadcastHeader(&cd.Header)
-		go cm.TryGenerate()
+	cd, UserData, err := cm.Generator.Generate()
+	if err != nil {
+		return nil, err
+	} else if cd == nil {
+		return nil, nil
 	}
+
+	if err := cm.chain.Process(cd, UserData); err != nil {
+		return nil, err
+	}
+	cm.broadcastHeader(&cd.Header)
+	go cm.Generate()
+	return cd, nil
 }
 
 func (cm *Manager) tryProcess() {
@@ -245,6 +257,7 @@ func (cm *Manager) tryProcess() {
 		}
 		item = cm.pool.Pop(cp.Height() + 1)
 	}
+	go cm.Generate()
 }
 
 func (cm *Manager) tryRequestData(From uint32, Count uint32) {

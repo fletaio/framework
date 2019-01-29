@@ -145,24 +145,3 @@ func (cn *Chain) Process(cd *Data, UserData interface{}) error {
 	}
 	return nil
 }
-
-// Generate generates and returns the next data
-func (cn *Chain) Generate() (*Data, error) {
-	cn.closeLock.RLock()
-	defer cn.closeLock.RUnlock()
-	if cn.isClose {
-		return nil, ErrChainClosed
-	}
-
-	cd, UserData, err := cn.handler.OnGenerate()
-	if err != nil {
-		return nil, err
-	} else if cd == nil {
-		return nil, nil
-	}
-
-	if err := cn.Process(cd, UserData); err != nil {
-		return nil, err
-	}
-	return cd, nil
-}
