@@ -11,7 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"git.fleta.io/fleta/network/simulations"
+
 	"git.fleta.io/fleta/common"
+	"git.fleta.io/fleta/framework/chain/mesh"
 	"git.fleta.io/fleta/framework/log"
 	"git.fleta.io/fleta/framework/message"
 	"git.fleta.io/fleta/framework/peer/peermessage"
@@ -26,8 +29,12 @@ var (
 )
 
 type testMessage struct {
+	BaseEventHandler
+	ID string
 	peermessage.PeerList
-	pm *manager
+	pm       *manager
+	onRecv   func(p mesh.Peer, msg message.Type, r io.Reader) error
+	onClosed func(p mesh.Peer)
 }
 
 var testMessageType message.Type
@@ -37,8 +44,34 @@ func init() {
 	os.RemoveAll("./test/")
 }
 
-func (p *testMessage) Type() message.Type {
+func (tm *testMessage) Type() message.Type {
 	return testMessageType
+}
+func (tm *testMessage) OnRecv(p mesh.Peer, t message.Type, r io.Reader) error {
+	return tm.onRecv(p, t, r)
+}
+func (tm *testMessage) OnClosed(p mesh.Peer) {
+	if tm.onClosed != nil {
+		tm.onClosed(p)
+	}
+}
+
+func upVisulaization(tms []*testMessage) {
+	mc := make(chan simulations.Msg)
+	go func() {
+		for {
+			for _, tm := range tms {
+				simulations.AddVisualizationData(tm.ID, "id", func(tm *testMessage) func() []string {
+					return func() []string { return []string{tm.ID} }
+				}(tm))
+				simulations.AddVisualizationData(tm.ID, "peer", tm.pm.NodeList)
+				simulations.AddVisualizationData(tm.ID, "group", tm.pm.GroupList)
+			}
+			time.Sleep(time.Second)
+		}
+	}()
+	go simulations.VisualizationStart(mc, 8080)
+
 }
 
 func Test_manager_BroadCast(t *testing.T) {
@@ -106,24 +139,27 @@ func Test_manager_BroadCast(t *testing.T) {
 					StorePath: tt.args.DefaultConfig.StorePath + strconv.Itoa(id) + "/",
 				}
 				r, _ := router.NewRouter(rc)
+				pm, _ := NewManager(tt.args.ChainCoord, r, pc)
 				mm := message.NewManager()
-				pm, _ := NewManager(tt.args.ChainCoord, r, mm, pc)
-
-				pm.RegisterEventHandler(&BaseEventHandler{})
 
 				tm := &testMessage{
-					pm: pm.(*manager),
+					pm: pm,
+					ID: fmt.Sprintf("%v", id),
 				}
-				tm.List = map[string]peermessage.ConnectInfo{}
 				func(tm *testMessage) {
-					mm.ApplyMessage(testMessageType, func(r io.Reader, mt message.Type) (message.Message, error) {
-						tm := &testMessage{}
-						tm.ReadFrom(r)
-						return tm, nil
-					}, func(m message.Message) error {
+					tm.onClosed = func(p mesh.Peer) {
+						// log.Notice("tm.onClosed ", tm.ID, p.ID())
+					}
+					tm.onRecv = func(p mesh.Peer, msg message.Type, r io.Reader) error {
+						m, err := mm.ParseMessage(r, msg)
+						if err != nil {
+							return err
+						}
 						if t, ok := m.(*testMessage); ok {
 							if len(tm.List) == 0 {
 								wg.Done()
+								log.Info(tm.ID, "Done")
+
 								tm.From = t.From
 								tm.List[strconv.Itoa(len(tm.List))] = peermessage.ConnectInfo{
 									Address: t.From,
@@ -134,6 +170,14 @@ func Test_manager_BroadCast(t *testing.T) {
 							return nil
 						}
 						return errors.New("is not test message")
+					}
+					pm.RegisterEventHandler(tm)
+
+					tm.List = map[string]peermessage.ConnectInfo{}
+					mm.SetCreator(testMessageType, func(r io.Reader, mt message.Type) (message.Message, error) {
+						tm := &testMessage{}
+						tm.ReadFrom(r)
+						return tm, nil
 					})
 				}(tm)
 
@@ -148,8 +192,20 @@ func Test_manager_BroadCast(t *testing.T) {
 				tms = append(tms, tm)
 			}
 
+			upVisulaization(tms)
+
 			for len(tms[len(tms)-1].pm.GroupList()) < 6 {
 				log.Info(len(tms[len(tms)-1].pm.GroupList()))
+
+				var l string
+				for i, t := range tms {
+					if len(t.pm.Peers()) > 0 {
+						l += fmt.Sprintf("%v:%v(%v),", i, len(t.pm.Peers()), tt.args.IDs[i])
+					} else {
+						l += fmt.Sprintf("%v:%v,", i, tt.args.IDs[i])
+					}
+				}
+				log.Notice(l)
 				time.Sleep(time.Second)
 			}
 
@@ -246,21 +302,18 @@ func Test_manager_ExceptCast(t *testing.T) {
 					StorePath: tt.args.DefaultConfig.StorePath + strconv.Itoa(id) + "/",
 				}
 				r, _ := router.NewRouter(rc)
+				pm, _ := NewManager(tt.args.ChainCoord, r, pc)
 				mm := message.NewManager()
-				pm, _ := NewManager(tt.args.ChainCoord, r, mm, pc)
-
-				pm.RegisterEventHandler(&BaseEventHandler{})
 
 				tm := &testMessage{
-					pm: pm.(*manager),
+					pm: pm,
 				}
-				tm.List = map[string]peermessage.ConnectInfo{}
 				func(tm *testMessage) {
-					mm.ApplyMessage(testMessageType, func(r io.Reader, mt message.Type) (message.Message, error) {
-						tm := &testMessage{}
-						tm.ReadFrom(r)
-						return tm, nil
-					}, func(m message.Message) error {
+					tm.onRecv = func(p mesh.Peer, msg message.Type, r io.Reader) error {
+						m, err := mm.ParseMessage(r, msg)
+						if err != nil {
+							return err
+						}
 						if t, ok := m.(*testMessage); ok {
 							if len(tm.List) == 0 {
 								wg.Done()
@@ -273,7 +326,16 @@ func Test_manager_ExceptCast(t *testing.T) {
 							return nil
 						}
 						return errors.New("is not test message")
+					}
+					pm.RegisterEventHandler(tm)
+
+					tm.List = map[string]peermessage.ConnectInfo{}
+					mm.SetCreator(testMessageType, func(r io.Reader, mt message.Type) (message.Message, error) {
+						tm := &testMessage{}
+						tm.ReadFrom(r)
+						return tm, nil
 					})
+
 				}(tm)
 
 				return tm
@@ -392,27 +454,32 @@ func Test_target_cast(t *testing.T) {
 					StorePath: tt.args.DefaultConfig.StorePath + strconv.Itoa(id) + "/",
 				}
 				r, _ := router.NewRouter(rc)
+				pm, _ := NewManager(tt.args.ChainCoord, r, pc)
 				mm := message.NewManager()
-				pm, _ := NewManager(tt.args.ChainCoord, r, mm, pc)
-
-				pm.RegisterEventHandler(&BaseEventHandler{})
 
 				tm := &testMessage{
-					pm: pm.(*manager),
+					pm: pm,
 				}
-				tm.List = map[string]peermessage.ConnectInfo{}
 				func(tm *testMessage) {
-					mm.ApplyMessage(testMessageType, func(r io.Reader, mt message.Type) (message.Message, error) {
-						tm := &testMessage{}
-						tm.ReadFrom(r)
-						return tm, nil
-					}, func(m message.Message) error {
+					tm.onRecv = func(p mesh.Peer, msg message.Type, r io.Reader) error {
+						m, err := mm.ParseMessage(r, msg)
+						if err != nil {
+							return err
+						}
 						if t, ok := m.(*testMessage); ok {
 							tm.From = t.From
 							wg.Done()
 							return nil
 						}
 						return errors.New("is not test message")
+					}
+					pm.RegisterEventHandler(tm)
+
+					tm.List = map[string]peermessage.ConnectInfo{}
+					mm.SetCreator(testMessageType, func(r io.Reader, mt message.Type) (message.Message, error) {
+						tm := &testMessage{}
+						tm.ReadFrom(r)
+						return tm, nil
 					})
 				}(tm)
 
@@ -501,7 +568,7 @@ func TestNewManager(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r, _ := router.NewRouter(tt.args.routerConfig)
-			_, err := NewManager(tt.args.ChainCoord, r, tt.args.mm, tt.args.Config)
+			_, err := NewManager(tt.args.ChainCoord, r, tt.args.Config)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewManager() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -526,7 +593,6 @@ func TestAddNode(t *testing.T) {
 		routerConfig2 *router.Config
 		Config1       *Config
 		Config2       *Config
-		mm            *message.Manager
 	}
 	tests := []struct {
 		name    string
@@ -560,7 +626,6 @@ func TestAddNode(t *testing.T) {
 				Config2: &Config{
 					StorePath: path + "/peer2/",
 				},
-				mm: message.NewManager(),
 			},
 			want:    true,
 			wantErr: false,
@@ -572,10 +637,10 @@ func TestAddNode(t *testing.T) {
 			addr1 = addr1 + ":" + strconv.Itoa(port)
 			addr2 = addr2 + ":" + strconv.Itoa(port)
 			r1, _ := router.NewRouter(tt.args.routerConfig1)
-			pm1, _ := NewManager(tt.args.ChainCoord, r1, tt.args.mm, tt.args.Config1)
+			pm1, _ := NewManager(tt.args.ChainCoord, r1, tt.args.Config1)
 
 			r2, _ := router.NewRouter(tt.args.routerConfig2)
-			pm2, _ := NewManager(tt.args.ChainCoord, r2, tt.args.mm, tt.args.Config2)
+			pm2, _ := NewManager(tt.args.ChainCoord, r2, tt.args.Config2)
 
 			err := pm2.AddNode(addr1)
 
@@ -617,7 +682,6 @@ func TestBanEvil(t *testing.T) {
 		ChainCoord    *common.Coordinate
 		routerConfig1 *router.Config
 		Config1       *Config
-		mm            *message.Manager
 	}
 	tests := []struct {
 		name    string
@@ -640,7 +704,6 @@ func TestBanEvil(t *testing.T) {
 				Config1: &Config{
 					StorePath: path + "/peer1/",
 				},
-				mm: message.NewManager(),
 			},
 			want:    true,
 			wantErr: router.ErrCanNotConnectToEvilNode,
@@ -650,13 +713,12 @@ func TestBanEvil(t *testing.T) {
 		tempAddr := "temp:" + strconv.Itoa(port)
 		t.Run(tt.name, func(t *testing.T) {
 			r1, _ := router.NewRouter(tt.args.routerConfig1)
-			pm, _ := NewManager(tt.args.ChainCoord, r1, tt.args.mm, tt.args.Config1)
-			pm1 := pm.(*manager)
-			pm1.AddNode(tempAddr)
-			pm1.StartManage()
-			pm1.doManageCandidate(tempAddr, csPunishableRequestWait)
+			pm, _ := NewManager(tt.args.ChainCoord, r1, tt.args.Config1)
+			pm.AddNode(tempAddr)
+			pm.StartManage()
+			pm.doManageCandidate(tempAddr, csPunishableRequestWait)
 
-			err := pm1.AddNode(tempAddr)
+			err := pm.AddNode(tempAddr)
 			if err != tt.wantErr {
 				t.Errorf("NewManager() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -728,8 +790,8 @@ func TestPeerListSpread(t *testing.T) {
 					StorePath: tt.args.DefaultConfig.StorePath + strconv.Itoa(id) + "/",
 				}
 				r, _ := router.NewRouter(rc)
-				mm := message.NewManager()
-				pm, _ := NewManager(tt.args.ChainCoord, r, mm, pc)
+
+				pm, _ := NewManager(tt.args.ChainCoord, r, pc)
 
 				pm.RegisterEventHandler(&BaseEventHandler{})
 
@@ -787,7 +849,6 @@ func Test_manager_EnforceConnect(t *testing.T) {
 		routerConfig2 *router.Config
 		Config1       *Config
 		Config2       *Config
-		mm            *message.Manager
 	}
 	tests := []struct {
 		name    string
@@ -821,7 +882,6 @@ func Test_manager_EnforceConnect(t *testing.T) {
 				Config2: &Config{
 					StorePath: path + "/peer2/",
 				},
-				mm: message.NewManager(),
 			},
 			want:    true,
 			wantErr: false,
@@ -833,10 +893,10 @@ func Test_manager_EnforceConnect(t *testing.T) {
 			addr1 = addr1 + ":" + strconv.Itoa(port)
 			addr2 = addr2 + ":" + strconv.Itoa(port)
 			r1, _ := router.NewRouter(tt.args.routerConfig1)
-			pm1, _ := NewManager(tt.args.ChainCoord, r1, tt.args.mm, tt.args.Config1)
+			pm1, _ := NewManager(tt.args.ChainCoord, r1, tt.args.Config1)
 
 			r2, _ := router.NewRouter(tt.args.routerConfig2)
-			pm2, _ := NewManager(tt.args.ChainCoord, r2, tt.args.mm, tt.args.Config2)
+			pm2, _ := NewManager(tt.args.ChainCoord, r2, tt.args.Config2)
 
 			err := pm2.AddNode(addr1)
 
@@ -941,24 +1001,18 @@ func Test_multi_chain_send(t *testing.T) {
 			wg.Add(4)
 
 			creator := func(r router.Router, ChainCoord *common.Coordinate, config *Config) (*testMessage, error) {
+				pm, _ := NewManager(ChainCoord, r, config)
 				mm := message.NewManager()
-				pm, err := NewManager(ChainCoord, r, mm, config)
-				if err != nil {
-					return nil, err
-				}
-
-				pm.RegisterEventHandler(&BaseEventHandler{})
 
 				tm := &testMessage{
-					pm: pm.(*manager),
+					pm: pm,
 				}
-				tm.List = map[string]peermessage.ConnectInfo{}
 				func(tm *testMessage) {
-					mm.ApplyMessage(testMessageType, func(r io.Reader, mt message.Type) (message.Message, error) {
-						tm := &testMessage{}
-						tm.ReadFrom(r)
-						return tm, nil
-					}, func(m message.Message) error {
+					tm.onRecv = func(p mesh.Peer, msg message.Type, r io.Reader) error {
+						m, err := mm.ParseMessage(r, msg)
+						if err != nil {
+							return err
+						}
 						if t, ok := m.(*testMessage); ok {
 							if len(tm.List) == 0 {
 								tm.From = t.From
@@ -972,6 +1026,14 @@ func Test_multi_chain_send(t *testing.T) {
 							return nil
 						}
 						return errors.New("is not test message")
+					}
+					pm.RegisterEventHandler(tm)
+
+					tm.List = map[string]peermessage.ConnectInfo{}
+					mm.SetCreator(testMessageType, func(r io.Reader, mt message.Type) (message.Message, error) {
+						tm := &testMessage{}
+						tm.ReadFrom(r)
+						return tm, nil
 					})
 				}(tm)
 

@@ -29,6 +29,7 @@ type Router interface {
 	Accept(ChainCoord *common.Coordinate) (net.Conn, time.Duration, error)
 	Localhost() string
 	EvilNodeManager() *evilnode.Manager
+	Conf() *Config
 }
 
 type router struct {
@@ -50,6 +51,10 @@ func NewRouter(Config *Config) (Router, error) {
 		evilNodeManager: evilnode.NewManager(&Config.EvilNodeConfig),
 		ReceiverChan:    ReceiverChanMap{},
 	}, nil
+}
+
+func (r *router) Conf() *Config {
+	return r.Config
 }
 
 //AddListen registers a logical connection as a waiting-for-connect condition.
@@ -123,7 +128,6 @@ func (r *router) Accept(ChainCoord *common.Coordinate) (net.Conn, time.Duration,
 	receiver := <-ch
 	var c net.Conn
 	c = receiver
-	log.Info("Accept ", c.LocalAddr().String(), c.RemoteAddr().String())
 	return c, receiver.ping, nil
 }
 
@@ -157,6 +161,8 @@ func (r *router) listening(l net.Listener) {
 			if err != nil {
 				if err == ErrCanNotConnectToEvilNode {
 					conn.Close()
+				} else {
+					log.Error("incommingConn err", err)
 				}
 			}
 			r.PConn.unlock()

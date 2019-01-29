@@ -125,7 +125,7 @@ func init() {
 }
 
 // SendRequestPeerList TODO
-func SendRequestPeerList(p message.SendInterface, from string) {
+func SendRequestPeerList(p message.Sender, from string) {
 	peerList := &PeerList{
 		Request: true,
 		From:    from,

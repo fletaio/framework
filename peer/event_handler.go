@@ -3,28 +3,25 @@ package peer
 import (
 	"io"
 
+	"git.fleta.io/fleta/framework/chain/mesh"
 	"git.fleta.io/fleta/framework/message"
 )
 
-//EventHandler is callback when peer connected or closed
-type EventHandler interface {
-	BeforeConnect(p Peer) error
-	AfterConnect(p Peer)
-	OnRecv(p Peer, t message.Type, r io.Reader) error
-	OnClosed(p Peer)
+//BaseEventHandler is empty EventHandler struct
+type BaseEventHandler struct {
+	mesh.EventHandler
 }
 
-//BaseEventHandler is empty EventHandler struct
-type BaseEventHandler struct{}
-
 //BeforeConnect is empty BaseEventHandler functions
-func (b *BaseEventHandler) BeforeConnect(p Peer) error { return nil }
+func (b *BaseEventHandler) BeforeConnect(p mesh.Peer) error { return nil }
 
 //AfterConnect is empty BaseEventHandler functions
-func (b *BaseEventHandler) AfterConnect(p Peer) {}
+func (b *BaseEventHandler) AfterConnect(p mesh.Peer) {}
 
 //OnRecv is empty BaseEventHandler functions
-func (b *BaseEventHandler) OnRecv(p Peer, t message.Type, r io.Reader) error { return nil }
+func (b *BaseEventHandler) OnRecv(p mesh.Peer, msg message.Type, r io.Reader) error {
+	return message.ErrUnhandledMessage
+}
 
 //OnClosed is empty BaseEventHandler functions
-func (b *BaseEventHandler) OnClosed(p Peer) {}
+func (b *BaseEventHandler) OnClosed(p mesh.Peer) {}
