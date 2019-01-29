@@ -217,6 +217,7 @@ func (cm *Manager) Run() {
 	}
 }
 
+// TryGenerate try to next block of the chain
 func (cm *Manager) TryGenerate() {
 	cm.generateLock.Lock()
 	defer cm.generateLock.Unlock()
