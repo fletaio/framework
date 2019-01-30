@@ -19,7 +19,7 @@ const (
 
 // RecvDeligator is used when the Manager cannot handle the message type
 type RecvDeligator interface {
-	OnRecv(p mesh.Peer, r io.Reader, t message.Type) error
+	OnRecv(p mesh.Peer, t message.Type, r io.Reader) error
 }
 
 // Status is a status of a peer
@@ -98,7 +98,7 @@ func (cm *Manager) OnTimerExpired(height uint32, ID string) {
 }
 
 // OnRecv is called when a message is received from the peer
-func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
+func (cm *Manager) OnRecv(p mesh.Peer, t message.Type, r io.Reader) error {
 	cm.Lock()
 	defer cm.Unlock()
 
@@ -109,7 +109,7 @@ func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 		if err != message.ErrUnknownMessage || cm.Deligator == nil {
 			return err
 		} else {
-			return cm.Deligator.OnRecv(p, r, t)
+			return cm.Deligator.OnRecv(p, t, r)
 		}
 	}
 	switch msg := m.(type) {
