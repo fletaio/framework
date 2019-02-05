@@ -1,8 +1,6 @@
 package mesh
 
 import (
-	"io"
-
 	"git.fleta.io/fleta/framework/message"
 )
 
@@ -15,14 +13,6 @@ type Mesh interface {
 	BanByID(ID string, Seconds uint32)
 	Unban(netAddr string)
 	Peers() []Peer
-}
-
-// EventHandler is a event handler of the mesh
-type EventHandler interface {
-	BeforeConnect(p Peer) error
-	AfterConnect(p Peer)
-	OnRecv(p Peer, msg message.Type, r io.Reader) error
-	OnClosed(p Peer)
 }
 
 // Peer is a connected node with this node

@@ -1,4 +1,4 @@
-package manager
+package chain
 
 import (
 	"io"
@@ -6,21 +6,20 @@ import (
 	"git.fleta.io/fleta/common"
 	"git.fleta.io/fleta/common/hash"
 	"git.fleta.io/fleta/common/util"
-	"git.fleta.io/fleta/framework/chain"
 	"git.fleta.io/fleta/framework/message"
 )
 
 // types
 var (
-	HeaderMessageType  = message.DefineType("chain.HeaderMessage")
-	DataMessageType    = message.DefineType("chain.DataMessage")
-	RequestMessageType = message.DefineType("chain.RequestMessage")
-	StatusMessageType  = message.DefineType("chain.StatusMessage")
+	HeaderMessageType  = message.DefineType("HeaderMessage")
+	DataMessageType    = message.DefineType("DataMessage")
+	RequestMessageType = message.DefineType("RequestMessage")
+	StatusMessageType  = message.DefineType("StatusMessage")
 )
 
 // HeaderMessage used to send a chain header to a peer
 type HeaderMessage struct {
-	Header     *chain.Header
+	Header     *Header
 	Signatures []common.Signature
 }
 
@@ -83,7 +82,7 @@ func (msg *HeaderMessage) ReadFrom(r io.Reader) (int64, error) {
 
 // DataMessage used to send a chain data to a peer
 type DataMessage struct {
-	Data *chain.Data
+	Data *Data
 }
 
 // Type returns message type
