@@ -1,8 +1,7 @@
-package manager
+package chain
 
 import (
 	"git.fleta.io/fleta/common/queue"
-	"git.fleta.io/fleta/framework/chain"
 )
 
 // Pool holds and provides the required data by the chain
@@ -19,11 +18,11 @@ func NewPool() *Pool {
 }
 
 // Push adds a data to the pool
-func (p *Pool) Push(cd *chain.Data) error {
+func (p *Pool) Push(cd *Data) error {
 	if item := p.q.Find(uint64(cd.Header.Height)); item != nil {
-		old := item.(*chain.Data)
+		old := item.(*Data)
 		if !old.Header.Hash().Equal(cd.Header.Hash()) {
-			return chain.ErrForkDetected
+			return ErrForkDetected
 		}
 	}
 	p.q.Insert(cd, uint64(cd.Header.Height))
@@ -36,7 +35,7 @@ func (p *Pool) Exist(TargetHeight uint32) bool {
 }
 
 // Pop returns the data of the target height
-func (p *Pool) Pop(TargetHeight uint32) *chain.Data {
+func (p *Pool) Pop(TargetHeight uint32) *Data {
 	targetHeight := uint64(TargetHeight)
 	for {
 		item, height := p.q.Peek()
@@ -47,7 +46,7 @@ func (p *Pool) Pop(TargetHeight uint32) *chain.Data {
 			p.q.Pop()
 		} else if height == targetHeight {
 			p.q.Pop()
-			return item.(*chain.Data)
+			return item.(*Data)
 		} else {
 			return nil
 		}
