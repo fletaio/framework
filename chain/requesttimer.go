@@ -8,15 +8,15 @@ import (
 // RequestTimer triggers a event when a request is expired
 type RequestTimer struct {
 	sync.Mutex
-	timerHash map[uint32]*requestTimerItem
-	manager   *Manager
+	timerMap map[uint32]*requestTimerItem
+	manager  *Manager
 }
 
 // NewRequestTimer returns a RequestTimer
 func NewRequestTimer(manager *Manager) *RequestTimer {
 	rm := &RequestTimer{
-		timerHash: map[uint32]*requestTimerItem{},
-		manager:   manager,
+		timerMap: map[uint32]*requestTimerItem{},
+		manager:  manager,
 	}
 	return rm
 }
@@ -26,7 +26,7 @@ func (rm *RequestTimer) Exist(height uint32) bool {
 	rm.Lock()
 	defer rm.Unlock()
 
-	_, has := rm.timerHash[height]
+	_, has := rm.timerMap[height]
 	return has
 }
 
@@ -35,7 +35,7 @@ func (rm *RequestTimer) Add(height uint32, t time.Duration, ID string) {
 	rm.Lock()
 	defer rm.Unlock()
 
-	rm.timerHash[height] = &requestTimerItem{
+	rm.timerMap[height] = &requestTimerItem{
 		Height:    height,
 		ExpiredAt: uint64(time.Now().UnixNano()) + uint64(t),
 		ID:        ID,
@@ -51,15 +51,15 @@ func (rm *RequestTimer) Run() {
 			rm.Lock()
 			expired := []*requestTimerItem{}
 			now := uint64(time.Now().UnixNano())
-			remainHash := map[uint32]*requestTimerItem{}
-			for h, v := range rm.timerHash {
+			remainMap := map[uint32]*requestTimerItem{}
+			for h, v := range rm.timerMap {
 				if v.ExpiredAt <= now {
 					expired = append(expired, v)
 				} else {
-					remainHash[h] = v
+					remainMap[h] = v
 				}
 			}
-			rm.timerHash = remainHash
+			rm.timerMap = remainMap
 			rm.Unlock()
 
 			for _, v := range expired {

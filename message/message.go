@@ -17,17 +17,17 @@ type Sender interface {
 // Type is message type
 type Type uint64
 
-var gDefineHash = map[Type]string{}
+var gDefineMap = map[Type]string{}
 
 // DefineType is return string type
 func DefineType(Name string) Type {
 	h := hash.DoubleHash([]byte(Name))
 	t := Type(util.BytesToUint64(h[:8]))
-	old, has := gDefineHash[t]
+	old, has := gDefineMap[t]
 	if has {
 		panic("Type is collapsed (" + old + ", " + Name + ")")
 	}
-	gDefineHash[t] = Name
+	gDefineMap[t] = Name
 	return t
 }
 
@@ -50,22 +50,22 @@ type Creator func(r io.Reader, mt Type) (Message, error)
 
 // Manager is a structure that stores data for message processing.
 type Manager struct {
-	messageHash     map[Type]Creator
-	messageHashLock sync.Mutex
+	messageMap     map[Type]Creator
+	messageMapLock sync.Mutex
 }
 
 // NewManager returns a Manager
 func NewManager() *Manager {
 	return &Manager{
-		messageHash: make(map[Type]Creator),
+		messageMap: make(map[Type]Creator),
 	}
 }
 
 // ParseMessage receives the data stream as a Reader and processes them through the creator and returns the message.
 func (mm *Manager) ParseMessage(r io.Reader, mt Type) (Message, error) {
-	mm.messageHashLock.Lock()
-	c, has := mm.messageHash[mt]
-	mm.messageHashLock.Unlock()
+	mm.messageMapLock.Lock()
+	c, has := mm.messageMap[mt]
+	mm.messageMapLock.Unlock()
 	if !has {
 		return nil, ErrUnknownMessage
 	}
@@ -77,27 +77,27 @@ func (mm *Manager) ParseMessage(r io.Reader, mt Type) (Message, error) {
 }
 
 // SetCreator is a function to register a message.
-// Register author and handler by type to use when receiving messageHash.
+// Register author and handler by type to use when receiving messageMap.
 func (mm *Manager) SetCreator(mt Type, c Creator) error {
-	mm.messageHashLock.Lock()
-	defer mm.messageHashLock.Unlock()
-	_, has := mm.messageHash[mt]
+	mm.messageMapLock.Lock()
+	defer mm.messageMapLock.Unlock()
+	_, has := mm.messageMap[mt]
 	if has {
 		return ErrAlreadyAppliedMessage
 	}
 
-	mm.messageHash[mt] = c
+	mm.messageMap[mt] = c
 	return nil
 }
 
-// DeleteMessage deletes registered messageHash.
+// DeleteMessage deletes registered messageMap.
 func (mm *Manager) DeleteMessage(m Type) error {
-	mm.messageHashLock.Lock()
-	defer mm.messageHashLock.Unlock()
-	_, has := mm.messageHash[m]
+	mm.messageMapLock.Lock()
+	defer mm.messageMapLock.Unlock()
+	_, has := mm.messageMap[m]
 	if !has {
 		return ErrNotAppliedMessage
 	}
-	delete(mm.messageHash, m)
+	delete(mm.messageMap, m)
 	return nil
 }

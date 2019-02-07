@@ -22,26 +22,26 @@ func retainProfiler() *Profiler {
 	defer hashLock.Unlock()
 
 	id := Caller + "#" + strconv.FormatInt(GOID, 10)
-	p, has := profilerHash[id]
+	p, has := profilerMap[id]
 	if !has {
 		p = &Profiler{
-			Caller:     Caller,
-			GOID:       GOID,
-			dataHash:   map[string]*dataLockable{},
-			ParentHash: map[string]bool{},
-			FileName:   FileName,
-			Line:       Line,
+			Caller:    Caller,
+			GOID:      GOID,
+			dataMap:   map[string]*dataLockable{},
+			ParentMap: map[string]bool{},
+			FileName:  FileName,
+			Line:      Line,
 		}
-		profilerHash[id] = p
+		profilerMap[id] = p
 	}
-	stack, has := stackHash[GOID]
+	stack, has := stackMap[GOID]
 	if !has {
 		stack = []*Profiler{}
 	}
 	if len(stack) > 0 {
-		p.ParentHash[stack[len(stack)-1].ID()] = true
+		p.ParentMap[stack[len(stack)-1].ID()] = true
 	}
-	stackHash[GOID] = append(stack, p)
+	stackMap[GOID] = append(stack, p)
 	return p
 }
 
@@ -49,20 +49,20 @@ func releaseProfiler(p *Profiler) {
 	hashLock.Lock()
 	defer hashLock.Unlock()
 
-	stack := stackHash[p.GOID]
-	stackHash[p.GOID] = stack[:len(stack)-1]
+	stack := stackMap[p.GOID]
+	stackMap[p.GOID] = stack[:len(stack)-1]
 }
 
 // Profiler is an alpha stage (*unstable yet)
 // It provides profile functions regardless of goroutines
 type Profiler struct {
 	sync.RWMutex
-	Caller     string
-	FileName   string
-	Line       int
-	GOID       int64
-	ParentHash map[string]bool
-	dataHash   map[string]*dataLockable
+	Caller    string
+	FileName  string
+	Line      int
+	GOID      int64
+	ParentMap map[string]bool
+	dataMap   map[string]*dataLockable
 }
 
 // Instance represents profiler of the goroutine
@@ -86,7 +86,7 @@ func Enter() *Instance {
 func EnterTag(Tag string) *Instance {
 	p := retainProfiler()
 	p.Lock()
-	data, has := p.dataHash[Tag]
+	data, has := p.dataMap[Tag]
 	if !has {
 		data = &dataLockable{
 			Data: Data{
@@ -94,7 +94,7 @@ func EnterTag(Tag string) *Instance {
 				TMax: -1,
 			},
 		}
-		p.dataHash[Tag] = data
+		p.dataMap[Tag] = data
 	}
 	p.Unlock()
 
@@ -124,7 +124,7 @@ func (p *Profiler) Exit(Tag string, tLastEnter int64) {
 	Caller := p.Caller
 	sd.FileName = p.FileName
 	sd.Line = p.Line
-	for k := range p.ParentHash {
+	for k := range p.ParentMap {
 		PkgName, FuncName := ParseCaller(k)
 		sd.Parents = append(sd.Parents, &Call{
 			PkgName:  PkgName,
@@ -132,7 +132,7 @@ func (p *Profiler) Exit(Tag string, tLastEnter int64) {
 		})
 	}
 	sd.Tag = Tag
-	data := p.dataHash[Tag]
+	data := p.dataMap[Tag]
 	p.RUnlock()
 	sd.PkgName, sd.FuncName = ParseCaller(Caller)
 
@@ -220,7 +220,7 @@ func Snapshot() []SnapshotData {
 	hashLock.Lock()
 	for _, p := range profilerHash {
 		p.RLock()
-		for tag, data := range p.dataHash {
+		for tag, data := range p.dataMap {
 			sd := SnapshotData{
 				ID:       p.ID(),
 				FileName: p.FileName,
@@ -228,7 +228,7 @@ func Snapshot() []SnapshotData {
 				Parents:  []*Call{},
 				Tag:      tag,
 			}
-			for k := range p.ParentHash {
+			for k := range p.ParentMap {
 				PkgName, FuncName := ParseCaller(k)
 				sd.Parents = append(sd.Parents, &Call{
 					PkgName:  PkgName,
