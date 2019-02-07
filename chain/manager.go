@@ -34,6 +34,7 @@ type Manager struct {
 	manager   *message.Manager
 	statusMap map[string]*Status
 
+	isRunning    bool
 	isClose      bool
 	closeLock    sync.RWMutex
 	processLock  sync.Mutex
@@ -99,6 +100,14 @@ func (cm *Manager) AfterConnect(p mesh.Peer) {
 	defer cm.Unlock()
 
 	cm.statusMap[p.ID()] = &Status{}
+
+	cp := cm.Provider()
+	msg := &StatusMessage{
+		Version:  cp.Version(),
+		Height:   cp.Height(),
+		PrevHash: cp.PrevHash(),
+	}
+	p.Send(msg)
 }
 
 // OnClosed is called when the peer is closed
@@ -160,34 +169,9 @@ func (cm *Manager) OnRecv(p mesh.Peer, t message.Type, r io.Reader) error {
 			status.Height = msg.Data.Header.Height
 		}
 
-		if msg.Data.Header.Height <= cp.Height() {
-			if err := cm.checkFork(&msg.Data.Header, msg.Data.Signatures); err != nil {
-				if err == ErrForkDetected {
-					// TODO : fork detected
-					panic(err) // TEMP
-				} else {
-					return err
-				}
-			} else {
-				cm.Mesh.BanByID(p.ID(), 0)
-				return err
-			}
-		} else {
-			if msg.Data.Header.Height <= cp.Height() {
-				return ErrInvalidHeight
-			}
-			if err := cm.chain.Screening(msg.Data); err != nil {
-				return err
-			}
-			if err := cm.pool.Push(msg.Data); err != nil {
-				if err == ErrForkDetected {
-					// TODO : fork detected
-					panic(err) // TEMP
-				} else {
-					return err
-				}
-			}
-			go cm.tryProcess()
+		if err := cm.AddData(msg.Data); err != nil {
+			cm.Mesh.BanByID(p.ID(), 0)
+			return err
 		}
 		return nil
 	case *RequestMessage:
@@ -204,9 +188,11 @@ func (cm *Manager) OnRecv(p mesh.Peer, t message.Type, r io.Reader) error {
 		return nil
 	case *StatusMessage:
 		status := cm.statusMap[p.ID()]
-		status.Version = msg.Version
-		status.Height = msg.Height
-		status.PrevHash = msg.PrevHash
+		if status.Height < msg.Height {
+			status.Version = msg.Version
+			status.Height = msg.Height
+			status.PrevHash = msg.PrevHash
+		}
 
 		height := cp.Height()
 		if msg.Height > height {
@@ -224,6 +210,14 @@ func (cm *Manager) OnRecv(p mesh.Peer, t message.Type, r io.Reader) error {
 
 // Run is the main loop of Manager
 func (cm *Manager) Run() {
+	cm.Lock()
+	if cm.isRunning {
+		cm.Unlock()
+		return
+	}
+	cm.isRunning = true
+	cm.Unlock()
+
 	go cm.requestTimer.Run()
 
 	cp := cm.chain.Provider()
@@ -239,6 +233,72 @@ func (cm *Manager) Run() {
 			timer.Reset(10 * time.Second)
 		}
 	}
+}
+
+// WaitForSync waits until required peers are connected and the chain is synced with them
+func (cm *Manager) WaitForSync(RequiredPeerCount int) {
+	cp := cm.chain.Provider()
+	timer := time.NewTimer(10 * time.Second)
+	for {
+		select {
+		case <-timer.C:
+			height := cp.Height()
+			if len(cm.statusMap) >= RequiredPeerCount {
+				Count := 0
+				isSynced := true
+				for _, v := range cm.statusMap {
+					if v.Version > 0 {
+						Count++
+						if height < v.Height {
+							isSynced = false
+							break
+						}
+					}
+				}
+				if Count >= RequiredPeerCount {
+					if isSynced {
+						return
+					}
+				}
+			}
+			timer.Reset(10 * time.Second)
+		}
+	}
+}
+
+// AddData adds a data to the chain
+func (cm *Manager) AddData(cd *Data) error {
+	cp := cm.Provider()
+
+	if cd.Header.Height <= cp.Height() {
+		if err := cm.checkFork(&cd.Header, cd.Signatures); err != nil {
+			if err == ErrForkDetected {
+				// TODO : fork detected
+				panic(err) // TEMP
+			} else {
+				return err
+			}
+		} else {
+			return err
+		}
+	} else {
+		if cd.Header.Height <= cp.Height() {
+			return ErrInvalidHeight
+		}
+		if err := cm.chain.Screening(cd); err != nil {
+			return err
+		}
+		if err := cm.pool.Push(cd); err != nil {
+			if err == ErrForkDetected {
+				// TODO : fork detected
+				panic(err) // TEMP
+			} else {
+				return err
+			}
+		}
+		go cm.tryProcess()
+	}
+	return nil
 }
 
 // Generate generates to next block of the chain
@@ -264,6 +324,53 @@ func (cm *Manager) Generate() (*Data, error) {
 	return cd, nil
 }
 
+// ValidateData validates a chain data
+func (cm *Manager) ValidateData(cd *Data) (interface{}, error) {
+	cm.closeLock.RLock()
+	defer cm.closeLock.RUnlock()
+	if cm.isClose {
+		return nil, ErrChainClosed
+	}
+
+	cm.Lock()
+	defer cm.Unlock()
+
+	cp := cm.chain.Provider()
+	height := cp.Height()
+	if cd.Header.Height != height+1 {
+		return nil, ErrInvalidHeight
+	}
+
+	if height == 0 {
+		if cd.Header.Version <= 0 {
+			return nil, ErrInvalidVersion
+		}
+		if !cd.Header.PrevHash.Equal(cp.PrevHash()) {
+			return nil, ErrInvalidPrevHash
+		}
+	} else {
+		PrevHeader, err := cp.Header(height)
+		if err != nil {
+			return nil, err
+		}
+		if cd.Header.Version < PrevHeader.Version {
+			return nil, ErrInvalidVersion
+		}
+		if !cd.Header.PrevHash.Equal(PrevHeader.Hash()) {
+			return nil, ErrInvalidPrevHash
+		}
+	}
+	BodyHash := hash.DoubleHash(cd.Body)
+	if !BodyHash.Equal(cd.Header.BodyHash) {
+		return nil, ErrInvalidBodyHash
+	}
+	UserData, err := cm.chain.Validate(cd)
+	if err != nil {
+		return nil, err
+	}
+	return UserData, nil
+}
+
 func (cm *Manager) tryProcess() {
 	cm.processLock.Lock()
 	defer cm.processLock.Unlock()
@@ -274,7 +381,7 @@ func (cm *Manager) tryProcess() {
 	for item != nil {
 		if err := cm.process(item, nil); err != nil {
 			log.Println(err)
-			break
+			return
 		} else {
 			cm.broadcastHeader(&item.Header)
 			cm.tryRequestData(item.Header.Height, DataFetchHeightDiffMax)
@@ -285,19 +392,6 @@ func (cm *Manager) tryProcess() {
 	if hasProcessed {
 		if cm.chain.IsGenerator() {
 			go cm.Generate()
-		}
-		height := cp.Height()
-		if len(cm.statusMap) >= 3 {
-			isSynced := true
-			for _, v := range cm.statusMap {
-				if v.Height > height {
-					isSynced = false
-					break
-				}
-			}
-			if isSynced {
-				// TODO : OnSynced
-			}
 		}
 	}
 }
