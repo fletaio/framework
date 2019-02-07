@@ -1,7 +1,6 @@
 package chain
 
 import (
-	"bytes"
 	"io"
 
 	"git.fleta.io/fleta/common/hash"
@@ -19,11 +18,7 @@ type Header struct {
 
 // Hash returns the hash value of it
 func (ch *Header) Hash() hash.Hash256 {
-	var buffer bytes.Buffer
-	if _, err := ch.WriteTo(&buffer); err != nil {
-		panic(err)
-	}
-	return hash.DoubleHash(buffer.Bytes())
+	return hash.DoubleHashByWriterTo(ch)
 }
 
 // WriteTo is a serialization function
