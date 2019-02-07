@@ -645,8 +645,8 @@ func (pm *manager) Unban(netAddr string) {
 	pm.BanPeerInfos.Delete(netAddr)
 }
 
-func (pm *manager) Peers() []Peer {
-	list := make([]Peer, 0)
+func (pm *manager) Peers() []mesh.Peer {
+	list := make([]mesh.Peer, 0)
 	pm.connections.Range(func(addr string, p Peer) bool {
 		list = append(list, p)
 		return true
