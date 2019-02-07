@@ -16,6 +16,7 @@ type Chain interface {
 	Screening(cd *Data) error
 	CheckFork(ch *Header, sigs []common.Signature) error
 	Process(cd *Data, UserData interface{}) error
+	Validate(cd *Data) (interface{}, error)
 	IsGenerator() bool
 	Generate() (*Data, interface{}, error)
 	OnRecv(p mesh.Peer, t message.Type, r io.Reader) error
