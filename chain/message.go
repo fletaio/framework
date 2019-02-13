@@ -11,15 +11,15 @@ import (
 
 // types
 var (
-	HeaderMessageType  = message.DefineType("HeaderMessage")
-	DataMessageType    = message.DefineType("DataMessage")
-	RequestMessageType = message.DefineType("RequestMessage")
-	StatusMessageType  = message.DefineType("StatusMessage")
+	HeaderMessageType  = message.DefineType("manager.HeaderMessage")
+	DataMessageType    = message.DefineType("manager.DataMessage")
+	RequestMessageType = message.DefineType("manager.RequestMessage")
+	StatusMessageType  = message.DefineType("manager.StatusMessage")
 )
 
 // HeaderMessage used to send a chain header to a peer
 type HeaderMessage struct {
-	Header     *Header
+	Header     Header
 	Signatures []common.Signature
 }
 

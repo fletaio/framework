@@ -19,13 +19,13 @@ func NewPool() *Pool {
 
 // Push adds a data to the pool
 func (p *Pool) Push(cd *Data) error {
-	if item := p.q.Find(uint64(cd.Header.Height)); item != nil {
+	if item := p.q.Find(uint64(cd.Header.Height())); item != nil {
 		old := item.(*Data)
 		if !old.Header.Hash().Equal(cd.Header.Hash()) {
 			return ErrForkDetected
 		}
 	}
-	p.q.Insert(cd, uint64(cd.Header.Height))
+	p.q.Insert(cd, uint64(cd.Header.Height()))
 	return nil
 }
 

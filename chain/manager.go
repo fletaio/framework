@@ -2,7 +2,6 @@ package chain
 
 import (
 	"io"
-	"log"
 	"sync"
 	"time"
 
@@ -38,7 +37,6 @@ type Manager struct {
 	isClose      bool
 	closeLock    sync.RWMutex
 	processLock  sync.Mutex
-	generateLock sync.Mutex
 	requestLock  sync.Mutex
 	requestTimer *RequestTimer
 }
@@ -139,15 +137,16 @@ func (cm *Manager) OnRecv(p mesh.Peer, t message.Type, r io.Reader) error {
 			return cm.chain.OnRecv(p, t, r)
 		}
 	}
+
 	switch msg := m.(type) {
 	case *HeaderMessage:
 		status := cm.statusMap[p.ID()]
-		if status.Height < msg.Header.Height {
-			status.Height = msg.Header.Height
+		if status.Height < msg.Header.Height() {
+			status.Height = msg.Header.Height()
 		}
 
 		height := cp.Height()
-		if msg.Header.Height <= height {
+		if msg.Header.Height() <= height {
 			if err := cm.checkFork(msg.Header, msg.Signatures); err != nil {
 				if err == ErrForkDetected {
 					// TODO : fork detected
@@ -155,22 +154,17 @@ func (cm *Manager) OnRecv(p mesh.Peer, t message.Type, r io.Reader) error {
 				} else {
 					return err
 				}
-			} else {
-				cm.Mesh.BanByID(p.ID(), 0)
-				return err
 			}
-		} else if msg.Header.Height-height < 10 {
-			cm.tryRequestData(msg.Header.Height, 1)
+		} else if msg.Header.Height()-height < 10 {
+			cm.tryRequestData(msg.Header.Height(), 1)
 		}
 		return nil
 	case *DataMessage:
 		status := cm.statusMap[p.ID()]
-		if status.Height < msg.Data.Header.Height {
-			status.Height = msg.Data.Header.Height
+		if status.Height < msg.Data.Header.Height() {
+			status.Height = msg.Data.Header.Height()
 		}
-
 		if err := cm.AddData(msg.Data); err != nil {
-			cm.Mesh.BanByID(p.ID(), 0)
 			return err
 		}
 		return nil
@@ -208,6 +202,35 @@ func (cm *Manager) OnRecv(p mesh.Peer, t message.Type, r io.Reader) error {
 	}
 }
 
+// AddData TODO
+func (cm *Manager) AddData(cd *Data) error {
+	cp := cm.Provider()
+	if cd.Header.Height() <= cp.Height() {
+		if err := cm.checkFork(cd.Header, cd.Signatures); err != nil {
+			if err == ErrForkDetected {
+				// TODO : fork detected
+				panic(err) // TEMP
+			} else {
+				return err
+			}
+		}
+	} else {
+		if err := cm.chain.Screening(cd); err != nil {
+			return err
+		}
+		if err := cm.pool.Push(cd); err != nil {
+			if err == ErrForkDetected {
+				// TODO : fork detected
+				panic(err) // TEMP
+			} else {
+				return err
+			}
+		}
+		go cm.tryProcess()
+	}
+	return nil
+}
+
 // Run is the main loop of Manager
 func (cm *Manager) Run() {
 	cm.Lock()
@@ -227,9 +250,6 @@ func (cm *Manager) Run() {
 		case <-timer.C:
 			height := cp.Height()
 			cm.tryRequestData(height, DataFetchHeightDiffMax)
-			if cm.chain.IsGenerator() {
-				go cm.Generate()
-			}
 			timer.Reset(10 * time.Second)
 		}
 	}
@@ -266,133 +286,18 @@ func (cm *Manager) WaitForSync(RequiredPeerCount int) {
 	}
 }
 
-// AddData adds a data to the chain
-func (cm *Manager) AddData(cd *Data) error {
-	cp := cm.Provider()
-
-	if cd.Header.Height <= cp.Height() {
-		if err := cm.checkFork(&cd.Header, cd.Signatures); err != nil {
-			if err == ErrForkDetected {
-				// TODO : fork detected
-				panic(err) // TEMP
-			} else {
-				return err
-			}
-		} else {
-			return err
-		}
-	} else {
-		if cd.Header.Height <= cp.Height() {
-			return ErrInvalidHeight
-		}
-		if err := cm.chain.Screening(cd); err != nil {
-			return err
-		}
-		if err := cm.pool.Push(cd); err != nil {
-			if err == ErrForkDetected {
-				// TODO : fork detected
-				panic(err) // TEMP
-			} else {
-				return err
-			}
-		}
-		go cm.tryProcess()
-	}
-	return nil
-}
-
-// Generate generates to next block of the chain
-func (cm *Manager) Generate() (*Data, error) {
-	if !cm.chain.IsGenerator() {
-		return nil, nil
-	}
-
-	cm.generateLock.Lock()
-	defer cm.generateLock.Unlock()
-
-	cd, UserData, err := cm.chain.Generate()
-	if err != nil {
-		return nil, err
-	} else if cd == nil {
-		return nil, nil
-	}
-	if err := cm.process(cd, UserData); err != nil {
-		return nil, err
-	}
-	cm.broadcastHeader(&cd.Header)
-	go cm.Generate()
-	return cd, nil
-}
-
-// ValidateData validates a chain data
-func (cm *Manager) ValidateData(cd *Data) (interface{}, error) {
-	cm.closeLock.RLock()
-	defer cm.closeLock.RUnlock()
-	if cm.isClose {
-		return nil, ErrChainClosed
-	}
-
-	cm.Lock()
-	defer cm.Unlock()
-
-	cp := cm.chain.Provider()
-	height := cp.Height()
-	if cd.Header.Height != height+1 {
-		return nil, ErrInvalidHeight
-	}
-
-	if height == 0 {
-		if cd.Header.Version <= 0 {
-			return nil, ErrInvalidVersion
-		}
-		if !cd.Header.PrevHash.Equal(cp.PrevHash()) {
-			return nil, ErrInvalidPrevHash
-		}
-	} else {
-		PrevHeader, err := cp.Header(height)
-		if err != nil {
-			return nil, err
-		}
-		if cd.Header.Version < PrevHeader.Version {
-			return nil, ErrInvalidVersion
-		}
-		if !cd.Header.PrevHash.Equal(PrevHeader.Hash()) {
-			return nil, ErrInvalidPrevHash
-		}
-	}
-	BodyHash := hash.DoubleHash(cd.Body)
-	if !BodyHash.Equal(cd.Header.BodyHash) {
-		return nil, ErrInvalidBodyHash
-	}
-	UserData, err := cm.chain.Validate(cd)
-	if err != nil {
-		return nil, err
-	}
-	return UserData, nil
-}
-
 func (cm *Manager) tryProcess() {
 	cm.processLock.Lock()
 	defer cm.processLock.Unlock()
 
-	hasProcessed := false
 	cp := cm.Provider()
 	item := cm.pool.Pop(cp.Height() + 1)
 	for item != nil {
-		if err := cm.process(item, nil); err != nil {
-			log.Println(err)
+		if err := cm.ProcessAndBroadcast(item, nil); err != nil {
 			return
-		} else {
-			cm.broadcastHeader(&item.Header)
-			cm.tryRequestData(item.Header.Height, DataFetchHeightDiffMax)
-			hasProcessed = true
 		}
+		cm.tryRequestData(item.Header.Height(), DataFetchHeightDiffMax)
 		item = cm.pool.Pop(cp.Height() + 1)
-	}
-	if hasProcessed {
-		if cm.chain.IsGenerator() {
-			go cm.Generate()
-		}
 	}
 }
 
@@ -413,17 +318,17 @@ func (cm *Manager) tryRequestData(From uint32, Count uint32) {
 			if !cm.requestTimer.Exist(TargetHeight) {
 				list := cm.Mesh.Peers()
 				for _, p := range list {
-					ph := cm.statusMap[p.ID()].Height
-
-					if ph >= TargetHeight {
-						sm := &RequestMessage{
-							Height: TargetHeight,
-						}
-						if err := p.Send(sm); err != nil {
-							cm.Mesh.Remove(p.NetAddr())
-						} else {
-							cm.requestTimer.Add(TargetHeight, 10*time.Second, p.ID())
-							break
+					if ph, has := cm.statusMap[p.ID()]; has {
+						if ph.Height >= TargetHeight {
+							sm := &RequestMessage{
+								Height: TargetHeight,
+							}
+							if err := p.Send(sm); err != nil {
+								cm.Mesh.Remove(p.NetAddr())
+							} else {
+								cm.requestTimer.Add(TargetHeight, 10*time.Second, p.ID())
+								break
+							}
 						}
 					}
 				}
@@ -432,7 +337,7 @@ func (cm *Manager) tryRequestData(From uint32, Count uint32) {
 	}
 }
 
-func (cm *Manager) checkFork(fh *Header, sigs []common.Signature) error {
+func (cm *Manager) checkFork(fh Header, sigs []common.Signature) error {
 	cm.closeLock.RLock()
 	defer cm.closeLock.RUnlock()
 	if cm.isClose {
@@ -440,19 +345,28 @@ func (cm *Manager) checkFork(fh *Header, sigs []common.Signature) error {
 	}
 
 	cp := cm.chain.Provider()
-	if fh.Height <= cp.Height() {
-		ch, err := cp.Header(fh.Height)
+	if fh.Height() <= cp.Height() {
+		ch, err := cp.Header(fh.Height())
 		if err != nil {
 			return err
 		}
 		if !ch.Hash().Equal(fh.Hash()) {
-			if ch.PrevHash.Equal(fh.PrevHash) {
+			if ch.PrevHash().Equal(fh.PrevHash()) {
 				if err := cm.chain.CheckFork(ch, sigs); err != nil {
 					return err
 				}
 			}
 		}
 	}
+	return nil
+}
+
+// ProcessAndBroadcast processes the chain data and broadcast it if it is processed
+func (cm *Manager) ProcessAndBroadcast(cd *Data, UserData interface{}) error {
+	if err := cm.process(cd, UserData); err != nil {
+		return err
+	}
+	cm.broadcastHeader(cd.Header)
 	return nil
 }
 
@@ -468,15 +382,15 @@ func (cm *Manager) process(cd *Data, UserData interface{}) error {
 
 	cp := cm.chain.Provider()
 	height := cp.Height()
-	if cd.Header.Height != height+1 {
+	if cd.Header.Height() != height+1 {
 		return ErrInvalidHeight
 	}
 
 	if height == 0 {
-		if cd.Header.Version <= 0 {
+		if cd.Header.Version() <= 0 {
 			return ErrInvalidVersion
 		}
-		if !cd.Header.PrevHash.Equal(cp.PrevHash()) {
+		if !cd.Header.PrevHash().Equal(cp.PrevHash()) {
 			return ErrInvalidPrevHash
 		}
 	} else {
@@ -484,16 +398,12 @@ func (cm *Manager) process(cd *Data, UserData interface{}) error {
 		if err != nil {
 			return err
 		}
-		if cd.Header.Version < PrevHeader.Version {
+		if cd.Header.Version() < PrevHeader.Version() {
 			return ErrInvalidVersion
 		}
-		if !cd.Header.PrevHash.Equal(PrevHeader.Hash()) {
+		if !cd.Header.PrevHash().Equal(PrevHeader.Hash()) {
 			return ErrInvalidPrevHash
 		}
-	}
-	BodyHash := hash.DoubleHash(cd.Body)
-	if !BodyHash.Equal(cd.Header.BodyHash) {
-		return ErrInvalidBodyHash
 	}
 	if err := cm.chain.Process(cd, UserData); err != nil {
 		return err
@@ -501,7 +411,7 @@ func (cm *Manager) process(cd *Data, UserData interface{}) error {
 	return nil
 }
 
-func (cm *Manager) broadcastHeader(ch *Header) {
+func (cm *Manager) broadcastHeader(ch Header) {
 	list := cm.Mesh.Peers()
 	for _, p := range list {
 		sm := &HeaderMessage{
@@ -515,13 +425,11 @@ func (cm *Manager) broadcastHeader(ch *Header) {
 
 func (cm *Manager) broadcastStatus() {
 	cp := cm.Provider()
-	cm.Lock()
 	msg := &StatusMessage{
 		Version:  cp.Version(),
 		Height:   cp.Height(),
 		PrevHash: cp.PrevHash(),
 	}
-	cm.Unlock()
 
 	list := cm.Mesh.Peers()
 	for _, p := range list {
@@ -535,7 +443,7 @@ func (cm *Manager) messageCreator(r io.Reader, t message.Type) (message.Message,
 	switch t {
 	case HeaderMessageType:
 		msg := &HeaderMessage{
-			Header: &Header{},
+			Header: cm.chain.Provider().CreateHeader(),
 		}
 		if _, err := msg.ReadFrom(r); err != nil {
 			return nil, err
@@ -543,7 +451,10 @@ func (cm *Manager) messageCreator(r io.Reader, t message.Type) (message.Message,
 		return msg, nil
 	case DataMessageType:
 		msg := &DataMessage{
-			Data: &Data{},
+			Data: &Data{
+				Header: cm.chain.Provider().CreateHeader(),
+				Body:   cm.chain.Provider().CreateBody(),
+			},
 		}
 		if _, err := msg.ReadFrom(r); err != nil {
 			return nil, err
@@ -556,7 +467,7 @@ func (cm *Manager) messageCreator(r io.Reader, t message.Type) (message.Message,
 		}
 		return msg, nil
 	case StatusMessageType:
-		msg := &RequestMessage{}
+		msg := &StatusMessage{}
 		if _, err := msg.ReadFrom(r); err != nil {
 			return nil, err
 		}

@@ -10,9 +10,8 @@ import (
 // Data is a unit of the chain
 type Data struct {
 	Header     Header
-	Body       []byte
+	Body       Body
 	Signatures []common.Signature
-	Extra      []byte
 }
 
 // WriteTo is a serialization function
@@ -23,7 +22,7 @@ func (cd *Data) WriteTo(w io.Writer) (int64, error) {
 	} else {
 		wrote += n
 	}
-	if n, err := util.WriteBytes(w, cd.Body); err != nil {
+	if n, err := cd.Body.WriteTo(w); err != nil {
 		return wrote, err
 	} else {
 		wrote += n
@@ -41,11 +40,6 @@ func (cd *Data) WriteTo(w io.Writer) (int64, error) {
 			}
 		}
 	}
-	if n, err := util.WriteBytes(w, cd.Extra); err != nil {
-		return wrote, err
-	} else {
-		wrote += n
-	}
 	return wrote, nil
 }
 
@@ -57,10 +51,9 @@ func (cd *Data) ReadFrom(r io.Reader) (int64, error) {
 	} else {
 		read += n
 	}
-	if bs, n, err := util.ReadBytes(r); err != nil {
+	if n, err := cd.Body.ReadFrom(r); err != nil {
 		return read, err
 	} else {
-		cd.Body = bs
 		read += n
 	}
 	if Len, n, err := util.ReadUint8(r); err != nil {
@@ -77,12 +70,6 @@ func (cd *Data) ReadFrom(r io.Reader) (int64, error) {
 				cd.Signatures = append(cd.Signatures, sig)
 			}
 		}
-	}
-	if bs, n, err := util.ReadBytes(r); err != nil {
-		return read, err
-	} else {
-		cd.Extra = bs
-		read += n
 	}
 	return read, nil
 }
