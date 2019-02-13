@@ -31,6 +31,11 @@ func DefineType(Name string) Type {
 	return t
 }
 
+// NameOfType returns the name of the type
+func NameOfType(t Type) string {
+	return gDefineMap[t]
+}
+
 // TypeToByte returns a byte array of the Type
 func TypeToByte(t Type) []byte {
 	bs := make([]byte, 8)
