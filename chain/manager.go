@@ -131,11 +131,7 @@ func (cm *Manager) OnRecv(p mesh.Peer, t message.Type, r io.Reader) error {
 
 	m, err := cm.manager.ParseMessage(r, t)
 	if err != nil {
-		if err != message.ErrUnknownMessage {
-			return err
-		} else {
-			return cm.chain.OnRecv(p, t, r)
-		}
+		return err
 	}
 
 	switch msg := m.(type) {
@@ -293,9 +289,10 @@ func (cm *Manager) tryProcess() {
 	cp := cm.Provider()
 	item := cm.pool.Pop(cp.Height() + 1)
 	for item != nil {
-		if err := cm.ProcessAndBroadcast(item, nil); err != nil {
+		if err := cm.Process(item, nil); err != nil {
 			return
 		}
+		cm.BroadcastHeader(item.Header)
 		cm.tryRequestData(item.Header.Height(), DataFetchHeightDiffMax)
 		item = cm.pool.Pop(cp.Height() + 1)
 	}
@@ -361,16 +358,8 @@ func (cm *Manager) checkFork(fh Header, sigs []common.Signature) error {
 	return nil
 }
 
-// ProcessAndBroadcast processes the chain data and broadcast it if it is processed
-func (cm *Manager) ProcessAndBroadcast(cd *Data, UserData interface{}) error {
-	if err := cm.process(cd, UserData); err != nil {
-		return err
-	}
-	cm.broadcastHeader(cd.Header)
-	return nil
-}
-
-func (cm *Manager) process(cd *Data, UserData interface{}) error {
+// Process processes the chain data
+func (cm *Manager) Process(cd *Data, UserData interface{}) error {
 	cm.closeLock.RLock()
 	defer cm.closeLock.RUnlock()
 	if cm.isClose {
@@ -411,29 +400,14 @@ func (cm *Manager) process(cd *Data, UserData interface{}) error {
 	return nil
 }
 
-func (cm *Manager) broadcastHeader(ch Header) {
+// BroadcastHeader sends the header to all of its peers
+func (cm *Manager) BroadcastHeader(ch Header) {
 	list := cm.Mesh.Peers()
 	for _, p := range list {
 		sm := &HeaderMessage{
 			Header: ch,
 		}
 		if err := p.Send(sm); err != nil {
-			cm.Mesh.Remove(p.NetAddr())
-		}
-	}
-}
-
-func (cm *Manager) broadcastStatus() {
-	cp := cm.Provider()
-	msg := &StatusMessage{
-		Version:  cp.Version(),
-		Height:   cp.Height(),
-		PrevHash: cp.PrevHash(),
-	}
-
-	list := cm.Mesh.Peers()
-	for _, p := range list {
-		if err := p.Send(msg); err != nil {
 			cm.Mesh.Remove(p.NetAddr())
 		}
 	}
