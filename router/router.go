@@ -89,11 +89,9 @@ func (r *router) AddListen(ChainCoord *common.Coordinate) error {
 //Request requests the connection by entering the address when a logical connection is required.
 //The chain coordinates support the connection between subchains.
 func (r *router) Request(addr string, ChainCoord *common.Coordinate) error {
-	/*
-		if r.localhost != "" && strings.HasPrefix(addr, r.localhost) {
-			return ErrCannotRequestToLocal
-		}
-	*/
+	if r.localhost != "" && strings.HasPrefix(addr, r.localhost) {
+		return ErrCannotRequestToLocal
+	}
 	if r.evilNodeManager.IsBanNode(addr) {
 		return ErrCanNotConnectToEvilNode
 	}
