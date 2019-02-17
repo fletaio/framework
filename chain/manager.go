@@ -198,7 +198,7 @@ func (cm *Manager) OnRecv(p mesh.Peer, t message.Type, r io.Reader) error {
 	}
 }
 
-// AddData TODO
+// AddData pushes a chain data to the chain queue
 func (cm *Manager) AddData(cd *Data) error {
 	cp := cm.Provider()
 	if cd.Header.Height() <= cp.Height() {

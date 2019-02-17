@@ -43,14 +43,14 @@ func TypeToByte(t Type) []byte {
 	return bs
 }
 
-// Message TODO
+// Message is a message for communicating between services
 type Message interface {
 	io.WriterTo
 	io.ReaderFrom
 	Type() Type
 }
 
-// Creator TODO
+// Creator is a message creator function type
 type Creator func(r io.Reader, mt Type) (Message, error)
 
 // Manager is a structure that stores data for message processing.
