@@ -1,7 +1,6 @@
 package message
 
 import (
-	"encoding/binary"
 	"io"
 	"sync"
 
@@ -36,21 +35,14 @@ func NameOfType(t Type) string {
 	return gDefineMap[t]
 }
 
-// TypeToByte returns a byte array of the Type
-func TypeToByte(t Type) []byte {
-	bs := make([]byte, 8)
-	binary.BigEndian.PutUint64(bs, uint64(t))
-	return bs
-}
-
-// Message is interface of readwrite struct
+// Message is a message for communicating between services
 type Message interface {
 	io.WriterTo
 	io.ReaderFrom
 	Type() Type
 }
 
-// Creator is type of message creator
+// Creator is a message creator function type
 type Creator func(r io.Reader, mt Type) (Message, error)
 
 // Manager is a structure that stores data for message processing.

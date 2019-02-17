@@ -32,7 +32,7 @@ func TestDefineType(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 
 			log.Debug(tt.args.messageType)
-			tb := TypeToByte(tt.args.messageType)
+			tb := util.Uint64ToBytes(uint64(tt.args.messageType))
 			log.Debug(tb)
 
 			buf := bytes.NewBuffer(tb)

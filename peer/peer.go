@@ -2,12 +2,12 @@ package peer
 
 import (
 	"bytes"
-	"encoding/binary"
 	"io"
 	"net"
 	"sync"
 	"time"
 
+	"git.fleta.io/fleta/common/util"
 	"git.fleta.io/fleta/framework/log"
 	"git.fleta.io/fleta/framework/message"
 )
@@ -78,8 +78,7 @@ func (p *peer) ConnectedTime() int64 {
 
 func (p *peer) readPacket() {
 	for !p.closed {
-		BNum := make([]byte, 8)
-		n, err := p.Read(BNum)
+		t, n, err := util.ReadUint64(p)
 		if err != nil {
 			if err != io.EOF {
 				log.Error("recv read type error : ", err)
@@ -90,11 +89,7 @@ func (p *peer) readPacket() {
 			log.Error("recv read type error : invalied packet length")
 			return
 		}
-
-		t := binary.BigEndian.Uint64(BNum)
-		mt := message.Type(t)
-
-		err = p.onRecvEventHandler(p, mt)
+		err = p.onRecvEventHandler(p, message.Type(t))
 		if err != nil {
 			log.Error("onRecv error : ", err)
 		}
@@ -106,10 +101,8 @@ func (p *peer) Send(m message.Message) error {
 	p.writeLock.Lock()
 	defer p.writeLock.Unlock()
 
-	mt := m.Type()
-
 	bf := bytes.Buffer{}
-	_, err := bf.Write(message.TypeToByte(mt))
+	_, err := util.WriteUint64(&bf, uint64(m.Type()))
 	if err != nil {
 		return err
 	}
@@ -118,8 +111,7 @@ func (p *peer) Send(m message.Message) error {
 		return err
 	}
 
-	bs := bf.Bytes()
-	_, err = p.Write(bs)
+	_, err = p.Write(bf.Bytes())
 	if err != nil {
 		return err
 	}
