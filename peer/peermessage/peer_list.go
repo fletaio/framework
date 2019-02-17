@@ -8,21 +8,21 @@ import (
 	"git.fleta.io/fleta/framework/message"
 )
 
-// PeerList TODO
+// PeerList is struct of peer list
 type PeerList struct {
 	Request bool
 	From    string
 	List    map[string]ConnectInfo
 }
 
-// ConnectInfo TODO
+// ConnectInfo is a structure of connection information that includes ping time and score board.
 type ConnectInfo struct {
 	Address        string
 	PingTime       time.Duration
 	PingScoreBoard *ScoreBoardMap
 }
 
-// NewConnectInfo TODO
+// NewConnectInfo is creator of ConnectInfo
 func NewConnectInfo(addr string, t time.Duration) ConnectInfo {
 	return ConnectInfo{
 		Address:        addr,
@@ -93,7 +93,7 @@ func (ci *ConnectInfo) ReadFrom(r io.Reader) (int64, error) {
 	return read, nil
 }
 
-// Score TODO
+// Score is calculated and returned based on the ping time.
 func (ci *ConnectInfo) Score() (score int64) {
 	ci.PingScoreBoard.Range(func(addr string, t time.Duration) bool {
 		score += int64(t)
@@ -108,7 +108,7 @@ const (
 	requestFalse = byte('f')
 )
 
-// PeerListCreator TODO
+// PeerListCreator reconstructs the PeerList from the Reader.
 func PeerListCreator(r io.Reader, mt message.Type) (message.Message, error) {
 	p := &PeerList{}
 	if _, err := p.ReadFrom(r); err != nil {
@@ -117,14 +117,14 @@ func PeerListCreator(r io.Reader, mt message.Type) (message.Message, error) {
 	return p, nil
 }
 
-// PeerListMessageType TODO
+// PeerListMessageType is define message type
 var PeerListMessageType message.Type
 
 func init() {
 	PeerListMessageType = message.DefineType("PeerList")
 }
 
-// SendRequestPeerList TODO
+// SendRequestPeerList transfers the peer list structure to a given peer
 func SendRequestPeerList(p message.Sender, from string) {
 	peerList := &PeerList{
 		Request: true,

@@ -43,14 +43,14 @@ func TypeToByte(t Type) []byte {
 	return bs
 }
 
-// Message TODO
+// Message is interface of readwrite struct
 type Message interface {
 	io.WriterTo
 	io.ReaderFrom
 	Type() Type
 }
 
-// Creator TODO
+// Creator is type of message creator
 type Creator func(r io.Reader, mt Type) (Message, error)
 
 // Manager is a structure that stores data for message processing.
