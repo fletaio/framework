@@ -146,7 +146,10 @@ func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 
 	switch msg := m.(type) {
 	case *HeaderMessage:
-		status := cm.statusMap[p.ID()]
+		status, has := cm.statusMap[p.ID()]
+		if !has {
+			return nil
+		}
 		if status.Height < msg.Header.Height() {
 			status.Height = msg.Header.Height()
 		}
@@ -166,7 +169,10 @@ func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 		}
 		return nil
 	case *DataMessage:
-		status := cm.statusMap[p.ID()]
+		status, has := cm.statusMap[p.ID()]
+		if !has {
+			return nil
+		}
 		if status.Height < msg.Data.Header.Height() {
 			status.Height = msg.Data.Header.Height()
 		}
@@ -187,7 +193,10 @@ func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 		}
 		return nil
 	case *StatusMessage:
-		status := cm.statusMap[p.ID()]
+		status, has := cm.statusMap[p.ID()]
+		if !has {
+			return nil
+		}
 		if status.Height < msg.Height {
 			status.Version = msg.Version
 			status.Height = msg.Height
