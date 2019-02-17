@@ -169,15 +169,16 @@ func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 		}
 		return nil
 	case *DataMessage:
+		if err := cm.AddData(msg.Data); err != nil {
+			return err
+		}
+
 		status, has := cm.statusMap[p.ID()]
 		if !has {
 			return nil
 		}
 		if status.Height < msg.Data.Header.Height() {
 			status.Height = msg.Data.Header.Height()
-		}
-		if err := cm.AddData(msg.Data); err != nil {
-			return err
 		}
 		return nil
 	case *RequestMessage:
