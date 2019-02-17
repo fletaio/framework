@@ -59,8 +59,10 @@ func (r *router) Conf() *Config {
 
 //AddListen registers a logical connection as a waiting-for-connect condition.
 func (r *router) AddListen(ChainCoord *common.Coordinate) error {
-	listenAddr := ":" + strconv.Itoa(r.Config.Port)
 	r.ListenersLock.Lock()
+	defer r.ListenersLock.Unlock()
+
+	listenAddr := ":" + strconv.Itoa(r.Config.Port)
 	_, has := r.Listeners.Load(listenAddr)
 	var listen net.Listener
 	if !has {
@@ -81,17 +83,17 @@ func (r *router) AddListen(ChainCoord *common.Coordinate) error {
 		go r.listening(l)
 	}
 	r.Listeners.Store(listenAddr, ChainCoord, listen)
-	r.ListenersLock.Unlock()
 	return nil
 }
 
 //Request requests the connection by entering the address when a logical connection is required.
 //The chain coordinates support the connection between subchains.
 func (r *router) Request(addr string, ChainCoord *common.Coordinate) error {
-	if r.localhost != "" && strings.HasPrefix(addr, r.localhost) {
-		return ErrCannotRequestToLocal
-	}
-
+	/*
+		if r.localhost != "" && strings.HasPrefix(addr, r.localhost) {
+			return ErrCannotRequestToLocal
+		}
+	*/
 	if r.evilNodeManager.IsBanNode(addr) {
 		return ErrCanNotConnectToEvilNode
 	}
