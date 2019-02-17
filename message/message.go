@@ -1,7 +1,6 @@
 package message
 
 import (
-	"encoding/binary"
 	"io"
 	"sync"
 
@@ -34,13 +33,6 @@ func DefineType(Name string) Type {
 // NameOfType returns the name of the type
 func NameOfType(t Type) string {
 	return gDefineMap[t]
-}
-
-// TypeToByte returns a byte array of the Type
-func TypeToByte(t Type) []byte {
-	bs := make([]byte, 8)
-	binary.BigEndian.PutUint64(bs, uint64(t))
-	return bs
 }
 
 // Message is a message for communicating between services
