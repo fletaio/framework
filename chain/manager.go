@@ -16,6 +16,11 @@ const (
 	DataFetchHeightDiffMax = 10
 )
 
+// Deligator handles a message that is not processed by the chain manager
+type Deligator interface {
+	OnRecv(p mesh.Peer, r io.Reader, t message.Type) error
+}
+
 // Status is a status of a peer
 type Status struct {
 	Version  uint16
@@ -26,7 +31,8 @@ type Status struct {
 // Manager synchronizes the chain via the mesh
 type Manager struct {
 	sync.Mutex
-	Mesh mesh.Mesh
+	Mesh      mesh.Mesh
+	Deligator Deligator
 
 	chain     Chain
 	pool      *Pool
@@ -123,7 +129,7 @@ func (cm *Manager) OnTimerExpired(height uint32, ID string) {
 }
 
 // OnRecv is called when a message is received from the peer
-func (cm *Manager) OnRecv(p mesh.Peer, t message.Type, r io.Reader) error {
+func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 	cm.Lock()
 	defer cm.Unlock()
 
@@ -131,7 +137,11 @@ func (cm *Manager) OnRecv(p mesh.Peer, t message.Type, r io.Reader) error {
 
 	m, err := cm.manager.ParseMessage(r, t)
 	if err != nil {
-		return err
+		if cm.Deligator == nil || err != message.ErrUnknownMessage {
+			return err
+		} else if err := cm.Deligator.OnRecv(p, r, t); err != nil {
+			return err
+		}
 	}
 
 	switch msg := m.(type) {

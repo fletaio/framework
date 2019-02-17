@@ -33,7 +33,7 @@ type testMessage struct {
 	ID string
 	peermessage.PeerList
 	pm       *manager
-	onRecv   func(p mesh.Peer, msg message.Type, r io.Reader) error
+	onRecv   func(p mesh.Peer, r io.Reader, t message.Type) error
 	onClosed func(p mesh.Peer)
 }
 
@@ -47,8 +47,8 @@ func init() {
 func (tm *testMessage) Type() message.Type {
 	return testMessageType
 }
-func (tm *testMessage) OnRecv(p mesh.Peer, t message.Type, r io.Reader) error {
-	return tm.onRecv(p, t, r)
+func (tm *testMessage) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
+	return tm.onRecv(p, r, t)
 }
 func (tm *testMessage) OnClosed(p mesh.Peer) {
 	if tm.onClosed != nil {
@@ -150,8 +150,8 @@ func Test_manager_BroadCast(t *testing.T) {
 					tm.onClosed = func(p mesh.Peer) {
 						// log.Notice("tm.onClosed ", tm.ID, p.ID())
 					}
-					tm.onRecv = func(p mesh.Peer, msg message.Type, r io.Reader) error {
-						m, err := mm.ParseMessage(r, msg)
+					tm.onRecv = func(p mesh.Peer, r io.Reader, t message.Type) error {
+						m, err := mm.ParseMessage(r, t)
 						if err != nil {
 							return err
 						}
@@ -309,8 +309,8 @@ func Test_manager_ExceptCast(t *testing.T) {
 					pm: pm,
 				}
 				func(tm *testMessage) {
-					tm.onRecv = func(p mesh.Peer, msg message.Type, r io.Reader) error {
-						m, err := mm.ParseMessage(r, msg)
+					tm.onRecv = func(p mesh.Peer, r io.Reader, t message.Type) error {
+						m, err := mm.ParseMessage(r, t)
 						if err != nil {
 							return err
 						}
@@ -461,8 +461,8 @@ func Test_target_cast(t *testing.T) {
 					pm: pm,
 				}
 				func(tm *testMessage) {
-					tm.onRecv = func(p mesh.Peer, msg message.Type, r io.Reader) error {
-						m, err := mm.ParseMessage(r, msg)
+					tm.onRecv = func(p mesh.Peer, r io.Reader, t message.Type) error {
+						m, err := mm.ParseMessage(r, t)
 						if err != nil {
 							return err
 						}
@@ -1008,8 +1008,8 @@ func Test_multi_chain_send(t *testing.T) {
 					pm: pm,
 				}
 				func(tm *testMessage) {
-					tm.onRecv = func(p mesh.Peer, msg message.Type, r io.Reader) error {
-						m, err := mm.ParseMessage(r, msg)
+					tm.onRecv = func(p mesh.Peer, r io.Reader, t message.Type) error {
+						m, err := mm.ParseMessage(r, t)
 						if err != nil {
 							return err
 						}

@@ -19,7 +19,7 @@ func (b *BaseEventHandler) BeforeConnect(p mesh.Peer) error { return nil }
 func (b *BaseEventHandler) AfterConnect(p mesh.Peer) {}
 
 //OnRecv is empty BaseEventHandler functions
-func (b *BaseEventHandler) OnRecv(p mesh.Peer, msg message.Type, r io.Reader) error {
+func (b *BaseEventHandler) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 	return message.ErrUnhandledMessage
 }
 

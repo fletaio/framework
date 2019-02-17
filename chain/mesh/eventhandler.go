@@ -10,6 +10,6 @@ import (
 type EventHandler interface {
 	BeforeConnect(p Peer) error
 	AfterConnect(p Peer)
-	OnRecv(p Peer, msg message.Type, r io.Reader) error
+	OnRecv(p Peer, r io.Reader, t message.Type) error
 	OnClosed(p Peer)
 }

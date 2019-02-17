@@ -195,7 +195,7 @@ func (pm *manager) onRecvEventHandler(p *peer, t message.Type) error {
 	pm.eventHandlerLock.RLock()
 	defer pm.eventHandlerLock.RUnlock()
 	for _, eh := range pm.eventHandler {
-		err := eh.OnRecv(p, t, p)
+		err := eh.OnRecv(p, p, t)
 		if err != nil {
 			if err == message.ErrUnknownMessage {
 				pm.errLog("onRecvEventHandler message.ErrUnknownMessage local ", p.LocalAddr().String(), "remote", p.RemoteAddr().String())
@@ -298,7 +298,7 @@ func (pm *manager) GroupList() []string {
 }
 
 // func (pm *manager) peerListHandler(m message.Message) error {
-func (pm *manager) OnRecv(p mesh.Peer, t message.Type, r io.Reader) error {
+func (pm *manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 	m, err := pm.MessageManager.ParseMessage(r, t)
 	if err != nil {
 		pm.errLog(err, p.ID())
