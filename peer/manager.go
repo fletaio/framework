@@ -62,8 +62,6 @@ type manager struct {
 
 	peerStorage storage.PeerStorage
 
-	BaseEventHandler
-
 	eventHandlerLock sync.RWMutex
 	eventHandler     []mesh.EventHandler
 	BanPeerInfos     *ByTime
@@ -645,3 +643,9 @@ func (pm *manager) Peers() []mesh.Peer {
 	})
 	return list
 }
+
+//OnConnected is empty BaseEventHandler functions
+func (pm *manager) OnConnected(p mesh.Peer) {}
+
+//OnDisconnected is empty BaseEventHandler functions
+func (pm *manager) OnDisconnected(p mesh.Peer) {}
