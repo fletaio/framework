@@ -31,7 +31,7 @@ type Manager struct {
 
 	chain     Chain
 	dataQ     *queue.SortedQueue
-	manager   *message.Manager
+	mm        *message.Manager
 	statusMap map[string]*Status
 
 	isRunning    bool
@@ -45,13 +45,13 @@ func NewManager(cn Chain) *Manager {
 	cm := &Manager{
 		chain:     cn,
 		dataQ:     queue.NewSortedQueue(),
-		manager:   message.NewManager(),
+		mm:        message.NewManager(),
 		statusMap: map[string]*Status{},
 	}
-	cm.manager.SetCreator(HeaderMessageType, cm.messageCreator)
-	cm.manager.SetCreator(DataMessageType, cm.messageCreator)
-	cm.manager.SetCreator(RequestMessageType, cm.messageCreator)
-	cm.manager.SetCreator(StatusMessageType, cm.messageCreator)
+	cm.mm.SetCreator(HeaderMessageType, cm.messageCreator)
+	cm.mm.SetCreator(DataMessageType, cm.messageCreator)
+	cm.mm.SetCreator(RequestMessageType, cm.messageCreator)
+	cm.mm.SetCreator(StatusMessageType, cm.messageCreator)
 	cm.requestTimer = NewRequestTimer(cm)
 	return cm
 }
@@ -76,8 +76,8 @@ func (cm *Manager) OnConnected(p mesh.Peer) {
 	})
 }
 
-// OnClosed is called when the peer is closed
-func (cm *Manager) OnClosed(p mesh.Peer) {
+// OnDisconnected is called when the peer is closed
+func (cm *Manager) OnDisconnected(p mesh.Peer) {
 	cm.Lock()
 	defer cm.Unlock()
 
@@ -92,7 +92,7 @@ func (cm *Manager) OnTimerExpired(height uint32, ID string) {
 
 // OnRecv is called when a message is received from the peer
 func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
-	m, err := cm.manager.ParseMessage(r, t)
+	m, err := cm.mm.ParseMessage(r, t)
 	if err != nil {
 		return err
 	}

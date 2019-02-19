@@ -5,18 +5,23 @@ import (
 	"time"
 )
 
+// RequestExpireHandler handles a request expire event
+type RequestExpireHandler interface {
+	OnTimerExpired(height uint32, ID string)
+}
+
 // RequestTimer triggers a event when a request is expired
 type RequestTimer struct {
 	sync.Mutex
 	timerMap map[uint32]*requestTimerItem
-	manager  *Manager
+	handler  RequestExpireHandler
 }
 
 // NewRequestTimer returns a RequestTimer
-func NewRequestTimer(manager *Manager) *RequestTimer {
+func NewRequestTimer(handler RequestExpireHandler) *RequestTimer {
 	rm := &RequestTimer{
 		timerMap: map[uint32]*requestTimerItem{},
-		manager:  manager,
+		handler:  handler,
 	}
 	return rm
 }
@@ -62,8 +67,10 @@ func (rm *RequestTimer) Run() {
 			rm.timerMap = remainMap
 			rm.Unlock()
 
-			for _, v := range expired {
-				rm.manager.OnTimerExpired(v.Height, v.ID)
+			if rm.handler != nil {
+				for _, v := range expired {
+					rm.handler.OnTimerExpired(v.Height, v.ID)
+				}
 			}
 			timer.Reset(100 * time.Millisecond)
 		}

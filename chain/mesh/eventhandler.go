@@ -9,6 +9,6 @@ import (
 // EventHandler is a event handler of the mesh
 type EventHandler interface {
 	OnConnected(p Peer)
-	OnClosed(p Peer)
+	OnDisconnected(p Peer)
 	OnRecv(p Peer, r io.Reader, t message.Type) error
 }

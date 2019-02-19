@@ -155,14 +155,6 @@ func (pm *manager) StartManage() {
 			go func(conn net.Conn) {
 				peer := newPeer(conn, pingTime, pm.deletePeer, pm.onRecvEventHandler)
 				pm.eventHandlerLock.RLock()
-				var err error
-				for _, eh := range pm.eventHandler {
-					err = eh.BeforeConnect(peer)
-					if err != nil {
-						pm.errLog("BeforeConnect(peer) err ", err)
-						break
-					}
-				}
 				pm.eventHandlerLock.RUnlock()
 				if err != nil {
 					pm.errLog("StartManage BeforeConnect event err ", err)
@@ -176,7 +168,7 @@ func (pm *manager) StartManage() {
 				}
 				pm.eventHandlerLock.RLock()
 				for _, eh := range pm.eventHandler {
-					eh.AfterConnect(peer)
+					eh.OnConnected(peer)
 				}
 				pm.eventHandlerLock.RUnlock()
 
@@ -473,14 +465,14 @@ func (pm *manager) kickOutPeerStorage(ip storage.Peer) {
 }
 
 func (pm *manager) deletePeer(addr string) {
+	pm.connections.Delete(addr)
 	pm.eventHandlerLock.RLock()
 	if p, has := pm.connections.Load(addr); has {
 		for _, eh := range pm.eventHandler {
-			eh.OnClosed(p)
+			eh.OnDisconnected(p)
 		}
 	}
 	pm.eventHandlerLock.RUnlock()
-	pm.connections.Delete(addr)
 }
 
 func (pm *manager) addPeer(p Peer) error {
