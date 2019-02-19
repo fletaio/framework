@@ -48,10 +48,10 @@ func (rm *RequestTimer) Run() {
 	for {
 		select {
 		case <-timer.C:
-			rm.Lock()
 			expired := []*requestTimerItem{}
 			now := uint64(time.Now().UnixNano())
 			remainMap := map[uint32]*requestTimerItem{}
+			rm.Lock()
 			for h, v := range rm.timerMap {
 				if v.ExpiredAt <= now {
 					expired = append(expired, v)
