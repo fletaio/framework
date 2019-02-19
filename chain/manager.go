@@ -99,6 +99,7 @@ func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 
 	switch msg := m.(type) {
 	case *HeaderMessage:
+		//log.Println("HeaderMessage", msg.Header.Height())
 		cm.Lock()
 		if status, has := cm.statusMap[p.ID()]; has {
 			if status.Height < msg.Header.Height() {
@@ -124,6 +125,7 @@ func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 		}
 		return nil
 	case *DataMessage:
+		//log.Println("DataMessage", msg.Data.Header.Height())
 		if err := cm.AddData(msg.Data); err != nil {
 			return err
 		}
@@ -139,6 +141,7 @@ func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 		cm.tryRequestData(msg.Data.Header.Height(), 1)
 		return nil
 	case *RequestMessage:
+		//log.Println("RequestMessage", msg.Height)
 		cd, err := cm.Provider().Data(msg.Height)
 		if err != nil {
 			return err
@@ -151,6 +154,7 @@ func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 		}
 		return nil
 	case *StatusMessage:
+		//log.Println("StatusMessage", msg.Height)
 		cm.Lock()
 		if status, has := cm.statusMap[p.ID()]; has {
 			if status.Height < msg.Height {
@@ -270,6 +274,7 @@ func (cm *Manager) tryRequestData(From uint32, Count uint32) {
 					is := ph != nil && ph.Height >= TargetHeight
 					cm.Unlock()
 					if is {
+						//log.Println("SendRequest", TargetHeight)
 						sm := &RequestMessage{
 							Height: TargetHeight,
 						}
