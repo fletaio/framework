@@ -716,7 +716,6 @@ func TestBanEvil(t *testing.T) {
 			pm, _ := NewManager(tt.args.ChainCoord, r1, tt.args.Config1)
 			pm.AddNode(tempAddr)
 			pm.StartManage()
-			pm.doManageCandidate(tempAddr, csPunishableRequestWait)
 
 			err := pm.AddNode(tempAddr)
 			if err != tt.wantErr {

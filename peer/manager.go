@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"git.fleta.io/fleta/framework/chain/mesh"
-	"git.fleta.io/fleta/framework/router/evilnode"
 
 	"git.fleta.io/fleta/common"
 	"git.fleta.io/fleta/framework/log"
@@ -70,9 +69,8 @@ type manager struct {
 type candidateState int
 
 const (
-	csRequestWait           candidateState = 1
-	csPunishableRequestWait candidateState = 2
-	csPeerListWait          candidateState = 3
+	csRequestWait  candidateState = 1
+	csPeerListWait candidateState = 2
 )
 
 //NewManager is the peerManager creator.
@@ -201,7 +199,7 @@ func (pm *manager) onRecvEventHandler(p *peer, t message.Type) error {
 func (pm *manager) EnforceConnect() {
 	dialList := []string{}
 	pm.candidates.rangeMap(func(addr string, cs candidateState) bool {
-		if cs == csRequestWait || cs == csPunishableRequestWait {
+		if cs == csRequestWait {
 			dialList = append(dialList, addr)
 		}
 		return true
@@ -363,15 +361,8 @@ func (pm *manager) doManageCandidate(addr string, cs candidateState) error {
 	case csRequestWait:
 		err = pm.router.Request(addr, pm.ChainCoord)
 		log.Debug(pm.router.Conf().Network, addr)
-		go pm.candidates.store(addr, csPunishableRequestWait)
 		if err != nil {
 			pm.errLog("RequestWait err ", err)
-		}
-	case csPunishableRequestWait:
-		err = pm.router.Request(addr, pm.ChainCoord)
-		if err != nil {
-			pm.router.EvilNodeManager().TellOn(addr, evilnode.DialFail)
-			pm.errLog("TellOn ", err)
 		}
 	case csPeerListWait:
 		if p, has := pm.connections.Load(addr); has {
@@ -470,7 +461,6 @@ func (pm *manager) deletePeer(addr string) {
 }
 
 func (pm *manager) addPeer(p Peer) error {
-	pm.errLog("addPeer ", p.RemoteAddr().String())
 	pm.peerGroupLock.Lock()
 	defer pm.peerGroupLock.Unlock()
 
@@ -482,7 +472,6 @@ func (pm *manager) addPeer(p Peer) error {
 		addr := p.NetAddr() // .RemoteAddr().String()
 		pm.connections.Store(addr, p)
 		pm.nodes.Store(addr, peermessage.NewConnectInfo(addr, p.PingTime()))
-		pm.errLog("nodes.Store, ", addr)
 		pm.candidates.store(addr, csPeerListWait)
 
 		go func(p Peer) {
@@ -508,7 +497,6 @@ func (pm *manager) addReadyConn(p Peer) {
 // AddNode is used to register additional peers from outside.
 func (pm *manager) Add(netAddr string, doForce bool) {
 	err := pm.router.Request(netAddr, pm.ChainCoord)
-	pm.candidates.store(netAddr, csPunishableRequestWait)
 	if err != nil {
 		pm.errLog("RequestWait err ", err, netAddr)
 	}

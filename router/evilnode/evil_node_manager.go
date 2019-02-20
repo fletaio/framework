@@ -31,7 +31,7 @@ type KindOfEvil uint16
 
 // evilnode evil score table
 const (
-	DialFail KindOfEvil = 40
+	BadBehaviour KindOfEvil = 40
 )
 
 const reduceEvilScorePerMinute uint16 = 1
