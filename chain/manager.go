@@ -2,7 +2,6 @@ package chain
 
 import (
 	"io"
-	"log"
 	"sync"
 	"time"
 
@@ -68,7 +67,7 @@ func (cm *Manager) OnConnected(p mesh.Peer) {
 	cm.statusMap[p.ID()] = &Status{}
 	cm.Unlock()
 
-	log.Println("OnConnected", p.ID())
+	//log.Println("OnConnected", p.ID())
 
 	cp := cm.Provider()
 	p.Send(&StatusMessage{
@@ -88,7 +87,7 @@ func (cm *Manager) OnDisconnected(p mesh.Peer) {
 
 // OnTimerExpired is called when request is expired
 func (cm *Manager) OnTimerExpired(height uint32, ID string) {
-	log.Println("OnTimerExpired", height, ID)
+	//log.Println("OnTimerExpired", height, ID)
 
 	cm.Mesh.RemoveByID(ID)
 	cm.tryRequestData(height, 1)
@@ -103,7 +102,7 @@ func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 
 	switch msg := m.(type) {
 	case *HeaderMessage:
-		log.Println("HeaderMessage", msg.Header.Height(), p.ID())
+		//log.Println("HeaderMessage", msg.Header.Height(), p.ID())
 		cm.Lock()
 		if status, has := cm.statusMap[p.ID()]; has {
 			if status.Height < msg.Header.Height() {
@@ -129,7 +128,7 @@ func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 		}
 		return nil
 	case *DataMessage:
-		log.Println("DataMessage", msg.Data.Header.Height(), p.ID())
+		//log.Println("DataMessage", msg.Data.Header.Height(), p.ID())
 		if err := cm.AddData(msg.Data); err != nil {
 			return err
 		}
@@ -160,7 +159,7 @@ func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 		}
 		return nil
 	case *StatusMessage:
-		log.Println("StatusMessage", msg.Height, p.ID())
+		//log.Println("StatusMessage", msg.Height, p.ID())
 		cm.Lock()
 		if status, has := cm.statusMap[p.ID()]; has {
 			if status.Height < msg.Height {
@@ -274,15 +273,11 @@ func (cm *Manager) tryRequestData(From uint32, Count uint32) {
 		if cm.dataQ.Find(uint64(TargetHeight)) == nil {
 			if !cm.requestTimer.Exist(TargetHeight) {
 				list := cm.Mesh.Peers()
-				isSuccess := false
 				for _, p := range list {
 					cm.Lock()
 					ph := cm.statusMap[p.ID()]
 					is := ph != nil && ph.Height >= TargetHeight
 					cm.Unlock()
-					if ph != nil {
-						log.Println("SendRequestTry", TargetHeight, ph.Height, len(list), p.ID())
-					}
 					if is {
 						//log.Println("SendRequest", TargetHeight, p.ID())
 						sm := &RequestMessage{
@@ -292,12 +287,10 @@ func (cm *Manager) tryRequestData(From uint32, Count uint32) {
 							cm.Mesh.Remove(p.NetAddr())
 						} else {
 							cm.requestTimer.Add(TargetHeight, 5*time.Second, p.ID())
-							isSuccess = true
 							break
 						}
 					}
 				}
-				log.Println("SendRequest", TargetHeight, isSuccess, len(list))
 			}
 		}
 	}
