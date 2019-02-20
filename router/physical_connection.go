@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/satori/go.uuid"
+	uuid "github.com/satori/go.uuid"
 
 	"git.fleta.io/fleta/common"
 	"git.fleta.io/fleta/common/util"
