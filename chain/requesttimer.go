@@ -47,6 +47,14 @@ func (rm *RequestTimer) Add(height uint32, t time.Duration, ID string) {
 	}
 }
 
+// Remove removes the timer of the request
+func (rm *RequestTimer) Remove(height uint32) {
+	rm.Lock()
+	defer rm.Unlock()
+
+	delete(rm.timerMap, height)
+}
+
 // Run is the main loop of RequestTimer
 func (rm *RequestTimer) Run() {
 	timer := time.NewTimer(100 * time.Millisecond)
