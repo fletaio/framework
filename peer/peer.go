@@ -40,7 +40,7 @@ type peer struct {
 }
 
 //NewPeer is the peer creator.
-func newPeer(conn net.Conn, pingTime time.Duration, deletePeer func(addr string), OnRecvEventHandler onRecv) Peer {
+func newPeer(conn net.Conn, pingTime time.Duration, deletePeer func(addr string), OnRecvEventHandler onRecv) *peer {
 	p := &peer{
 		Conn:               conn,
 		pingTime:           pingTime,
@@ -49,8 +49,6 @@ func newPeer(conn net.Conn, pingTime time.Duration, deletePeer func(addr string)
 		connectedTime:      time.Now().UnixNano(),
 		onRecvEventHandler: OnRecvEventHandler,
 	}
-
-	go p.readPacket()
 
 	return p
 }
@@ -74,6 +72,10 @@ func (p *peer) NetAddr() string {
 
 func (p *peer) ConnectedTime() int64 {
 	return p.connectedTime
+}
+
+func (p *peer) Start() {
+	go p.readPacket()
 }
 
 func (p *peer) readPacket() {

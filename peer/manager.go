@@ -167,7 +167,7 @@ func (pm *manager) StartManage() {
 					eh.OnConnected(peer)
 				}
 				pm.eventHandlerLock.RUnlock()
-
+				peer.Start()
 			}(conn)
 		}
 	}()
