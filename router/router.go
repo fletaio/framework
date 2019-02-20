@@ -103,7 +103,7 @@ func (r *router) Request(addr string, ChainCoord *common.Coordinate) error {
 
 	pConn, has := r.PConn.load(addr)
 	if !has {
-		conn, err := network.Dial(r.Config.Network, addr)
+		conn, err := network.DialTimeout(r.Config.Network, addr, time.Second*2)
 		if err != nil {
 			return err
 		}
