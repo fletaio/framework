@@ -152,8 +152,6 @@ func (pm *manager) StartManage() {
 
 			go func(conn net.Conn) {
 				peer := newPeer(conn, pingTime, pm.deletePeer, pm.onRecvEventHandler)
-				pm.eventHandlerLock.RLock()
-				pm.eventHandlerLock.RUnlock()
 				if err != nil {
 					pm.errLog("StartManage BeforeConnect event err ", err)
 					peer.Close()
