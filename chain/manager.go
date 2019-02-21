@@ -14,7 +14,7 @@ import (
 
 // consts
 const (
-	DataFetchHeightDiffMax = 10
+	DataFetchHeightDiffMax = 100
 )
 
 // Status is a status of a peer
