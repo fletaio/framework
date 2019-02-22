@@ -314,8 +314,32 @@ func (cm *Manager) checkFork(fh Header, sigs []common.Signature) error {
 	return nil
 }
 
+// ProcessWithCallback processes the chain data
+func (cm *Manager) ProcessWithCallback(cd *Data, UserData interface{}, pre func(), post func()) error {
+	cm.Lock()
+	defer cm.Unlock()
+
+	if pre != nil {
+		pre()
+	}
+	defer func() {
+		if post != nil {
+			post()
+		}
+	}()
+
+	return cm.processInternal(cd, UserData)
+}
+
 // Process processes the chain data
 func (cm *Manager) Process(cd *Data, UserData interface{}) error {
+	cm.Lock()
+	defer cm.Unlock()
+
+	return cm.processInternal(cd, UserData)
+}
+
+func (cm *Manager) processInternal(cd *Data, UserData interface{}) error {
 	cm.Lock()
 	defer cm.Unlock()
 
