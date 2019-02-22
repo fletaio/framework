@@ -340,9 +340,6 @@ func (cm *Manager) Process(cd *Data, UserData interface{}) error {
 }
 
 func (cm *Manager) processInternal(cd *Data, UserData interface{}) error {
-	cm.Lock()
-	defer cm.Unlock()
-
 	cp := cm.chain.Provider()
 	height := cp.Height()
 	if cd.Header.Height() != height+1 {
