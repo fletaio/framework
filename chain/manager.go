@@ -21,7 +21,7 @@ const (
 type Status struct {
 	Version  uint16
 	Height   uint32
-	PrevHash hash.Hash256
+	LastHash hash.Hash256
 }
 
 // Manager synchronizes the chain via the mesh
@@ -73,7 +73,7 @@ func (cm *Manager) OnConnected(p mesh.Peer) {
 	p.Send(&StatusMessage{
 		Version:  cp.Version(),
 		Height:   cp.Height(),
-		PrevHash: cp.PrevHash(),
+		LastHash: cp.LastHash(),
 	})
 }
 
@@ -165,7 +165,7 @@ func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 			if status.Height < msg.Height {
 				status.Version = msg.Version
 				status.Height = msg.Height
-				status.PrevHash = msg.PrevHash
+				status.LastHash = msg.LastHash
 			}
 		}
 		cm.Unlock()
@@ -350,7 +350,7 @@ func (cm *Manager) processInternal(cd *Data, UserData interface{}) error {
 		if cd.Header.Version() <= 0 {
 			return ErrInvalidVersion
 		}
-		if !cd.Header.PrevHash().Equal(cp.PrevHash()) {
+		if !cd.Header.PrevHash().Equal(cp.LastHash()) {
 			return ErrInvalidPrevHash
 		}
 	} else {

@@ -149,7 +149,7 @@ func (msg *RequestMessage) ReadFrom(r io.Reader) (int64, error) {
 type StatusMessage struct {
 	Version  uint16
 	Height   uint32
-	PrevHash hash.Hash256
+	LastHash hash.Hash256
 }
 
 // Type returns message type
@@ -170,7 +170,7 @@ func (msg *StatusMessage) WriteTo(w io.Writer) (int64, error) {
 	} else {
 		wrote += n
 	}
-	if n, err := msg.PrevHash.WriteTo(w); err != nil {
+	if n, err := msg.LastHash.WriteTo(w); err != nil {
 		return wrote, err
 	} else {
 		wrote += n
@@ -193,7 +193,7 @@ func (msg *StatusMessage) ReadFrom(r io.Reader) (int64, error) {
 		read += n
 		msg.Height = v
 	}
-	if n, err := msg.PrevHash.ReadFrom(r); err != nil {
+	if n, err := msg.LastHash.ReadFrom(r); err != nil {
 		return read, err
 	} else {
 		read += n
