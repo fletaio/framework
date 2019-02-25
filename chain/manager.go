@@ -293,13 +293,8 @@ func (cm *Manager) checkFork(fh Header, sigs []common.Signature) error {
 
 // Process processes the chain data
 func (cm *Manager) Process(cd *Data, UserData interface{}) error {
-	cm.chain.DebugLog("TryLock", "cm.Process")
-
 	cm.Lock()
 	defer cm.Unlock()
-
-	cm.chain.DebugLog("Lock", "cm.Process")
-	defer cm.chain.DebugLog("Unlock", "cm.Process")
 
 	cp := cm.chain.Provider()
 	height := cp.Height()
