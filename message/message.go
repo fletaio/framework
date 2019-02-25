@@ -6,7 +6,6 @@ import (
 
 	"git.fleta.io/fleta/common/hash"
 	"git.fleta.io/fleta/common/util"
-	"git.fleta.io/fleta/framework/log"
 )
 
 // Sender is Default function of messenger
@@ -62,7 +61,7 @@ func NewManager() *Manager {
 // ParseMessage receives the data stream as a Reader and processes them through the creator and returns the message.
 func (mm *Manager) ParseMessage(r io.Reader, mt Type) (Message, error) {
 	mm.messageMapLock.Lock()
-	log.Info("ParseMessage", NameOfType(mt), mt)
+	//log.Info("ParseMessage", NameOfType(mt), mt)
 	c, has := mm.messageMap[mt]
 	mm.messageMapLock.Unlock()
 	if !has {
@@ -80,7 +79,7 @@ func (mm *Manager) ParseMessage(r io.Reader, mt Type) (Message, error) {
 func (mm *Manager) SetCreator(mt Type, c Creator) error {
 	mm.messageMapLock.Lock()
 	defer mm.messageMapLock.Unlock()
-	log.Info("SetCreator", NameOfType(mt), mt)
+	//log.Info("SetCreator", NameOfType(mt), mt)
 	_, has := mm.messageMap[mt]
 	if has {
 		return ErrAlreadyAppliedMessage
