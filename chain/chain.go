@@ -10,4 +10,5 @@ type Chain interface {
 	Screening(cd *Data) error
 	CheckFork(ch Header, sigs []common.Signature) error
 	Process(cd *Data, UserData interface{}) error
+	DebugLog(args ...interface{})
 }
