@@ -16,4 +16,5 @@ var (
 	ErrCannotRequestToLocal      = errors.New("cannot request to local")
 	ErrNotFoundPort              = errors.New("not found port")
 	ErrCanNotConnectToEvilNode   = errors.New("can not connect to evil node")
+	ErrWriteTimeout              = errors.New("write timeout")
 )

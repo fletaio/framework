@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"git.fleta.io/fleta/common"
 	"git.fleta.io/fleta/core/block"
@@ -127,9 +128,23 @@ func (rm *Manager) handleEvent(noti *EventNotify) {
 		return
 	}
 	for _, conn := range conns {
-		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		errCh := make(chan error)
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			wg.Done()
+			err := conn.WriteMessage(websocket.TextMessage, data)
+			errCh <- err
+		}()
+		wg.Wait()
+		deadTimer := time.NewTimer(5 * time.Second)
+		select {
+		case <-deadTimer.C:
 			conn.Close()
-			return
+		case <-errCh:
+			if err != nil {
+				conn.Close()
+			}
 		}
 	}
 }
@@ -206,8 +221,23 @@ func (rm *Manager) Run(kn *kernel.Kernel, Bind string) error {
 				}
 				res := rm.handleJRPC(kn, &req)
 				if res != nil {
-					if err := conn.WriteJSON(res); err != nil {
-						return err
+					errCh := make(chan error)
+					var wg sync.WaitGroup
+					wg.Add(1)
+					go func() {
+						wg.Done()
+						err := conn.WriteJSON(res)
+						errCh <- err
+					}()
+					wg.Wait()
+					deadTimer := time.NewTimer(5 * time.Second)
+					select {
+					case <-deadTimer.C:
+						return ErrClientTimeout
+					case <-errCh:
+						if err != nil {
+							return err
+						}
 					}
 				}
 			}

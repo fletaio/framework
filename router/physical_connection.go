@@ -170,6 +170,7 @@ func (pc *physicalConnection) sendClose(ChainCoord *common.Coordinate) error {
 
 func (pc *physicalConnection) write(body []byte, ChainCoord *common.Coordinate, compression uint8) (int64, error) {
 	var wrote int64
+	var buffer bytes.Buffer
 
 	pc.writeLock.Lock()
 	defer pc.writeLock.Unlock()
@@ -178,19 +179,19 @@ func (pc *physicalConnection) write(body []byte, ChainCoord *common.Coordinate, 
 		return wrote, ErrNotConnected
 	}
 
-	if n, err := util.WriteUint8(pc.PConn, MAGICWORD); err == nil {
+	if n, err := util.WriteUint8(&buffer, MAGICWORD); err == nil {
 		wrote += n
 	} else {
 		return wrote, err
 	}
 
-	if n, err := ChainCoord.WriteTo(pc.PConn); err == nil {
+	if n, err := ChainCoord.WriteTo(&buffer); err == nil {
 		wrote += int64(n)
 	} else {
 		return wrote, err
 	}
 
-	if n, err := util.WriteUint8(pc.PConn, compression); err == nil {
+	if n, err := util.WriteUint8(&buffer, compression); err == nil {
 		wrote += n
 	} else {
 		return wrote, err
@@ -214,13 +215,13 @@ func (pc *physicalConnection) write(body []byte, ChainCoord *common.Coordinate, 
 	}
 
 	size := len(body)
-	if n, err := util.WriteUint32(pc.PConn, uint32(size)); err == nil {
+	if n, err := util.WriteUint32(&buffer, uint32(size)); err == nil {
 		wrote += n
 	} else {
 		return wrote, err
 	}
 
-	if n, err := pc.PConn.Write(body); err == nil {
+	if n, err := buffer.Write(body); err == nil {
 		wrote += int64(n)
 	} else {
 		return wrote, err
@@ -228,13 +229,32 @@ func (pc *physicalConnection) write(body []byte, ChainCoord *common.Coordinate, 
 
 	checksum := crc32.Checksum(body, IEEETable)
 
-	if n, err := util.WriteUint32(pc.PConn, checksum); err == nil {
+	if n, err := util.WriteUint32(&buffer, checksum); err == nil {
 		wrote += n
 	} else {
 		return wrote, err
 	}
 
-	return wrote, nil
+	errCh := make(chan error)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		wg.Done()
+		_, err := pc.PConn.Write(buffer.Bytes())
+		if err != nil {
+			pc.PConn.Close()
+		}
+		errCh <- err
+	}()
+	wg.Wait()
+	deadTimer := time.NewTimer(5 * time.Second)
+	select {
+	case <-deadTimer.C:
+		pc.PConn.Close()
+		return wrote, ErrWriteTimeout
+	case err := <-errCh:
+		return wrote, err
+	}
 }
 
 func (pc *physicalConnection) readConn() (body []byte, isHandshake bool, ChainCoord *common.Coordinate, returnErr error) {
