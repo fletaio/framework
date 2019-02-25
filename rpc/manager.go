@@ -304,14 +304,14 @@ func (rm *Manager) DoTransactionBroadcast(kn *kernel.Kernel, msg *message_def.Tr
 	})
 }
 
-// DebugLog TEMP
+// DebugLog provides internal debug logs to handlers
 func (rm *Manager) DebugLog(kn *kernel.Kernel, args ...interface{}) {
 	if len(args) > 0 {
 		str := fmt.Sprintln(args...)
 		rm.handleEvent(&EventNotify{
 			Type: "DebugLog",
 			Data: map[string]interface{}{
-				"log": str[len(str)-1],
+				"log": str[:len(str)-1],
 			},
 		})
 	}
