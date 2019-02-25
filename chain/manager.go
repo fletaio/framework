@@ -35,8 +35,6 @@ type Manager struct {
 	statusMap map[string]*Status
 
 	isRunning    bool
-	processLock  sync.Mutex
-	requestLock  sync.Mutex
 	requestTimer *RequestTimer
 }
 
@@ -90,7 +88,6 @@ func (cm *Manager) OnTimerExpired(height uint32, ID string) {
 	//log.Println("OnTimerExpired", height, ID)
 
 	cm.Mesh.RemoveByID(ID)
-	cm.tryRequestData(height, 1)
 }
 
 // OnRecv is called when a message is received from the peer
@@ -121,10 +118,6 @@ func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 					return err
 				}
 			}
-		} else if msg.Header.Height()-height < 10 {
-			cm.tryRequestData(msg.Header.Height(), 1)
-		} else {
-			cm.tryRequestData(height+1, 1)
 		}
 		return nil
 	case *DataMessage:
@@ -142,8 +135,6 @@ func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 			}
 		}
 		cm.Unlock()
-
-		cm.tryRequestData(msg.Data.Header.Height()+1, 1)
 		return nil
 	case *RequestMessage:
 		//log.Println("RequestMessage", msg.Height, p.ID())
@@ -169,15 +160,6 @@ func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 			}
 		}
 		cm.Unlock()
-
-		height := cm.Provider().Height()
-		if msg.Height > height {
-			diff := msg.Height - height
-			if diff > DataFetchHeightDiffMax {
-				diff = DataFetchHeightDiffMax
-			}
-			cm.tryRequestData(height+1, diff)
-		}
 		return nil
 	default:
 		return message.ErrUnhandledMessage
@@ -207,7 +189,6 @@ func (cm *Manager) AddData(cd *Data) error {
 				panic(ErrForkDetected) // TEMP
 			}
 		}
-		go cm.tryProcess()
 	}
 	return nil
 }
@@ -224,38 +205,21 @@ func (cm *Manager) Run() {
 
 	go cm.requestTimer.Run()
 
-	timer := time.NewTimer(10 * time.Second)
+	reqTimer := time.NewTimer(time.Millisecond)
+	processTimer := time.NewTimer(time.Millisecond)
 	for {
 		select {
-		case <-timer.C:
+		case <-reqTimer.C:
 			cm.tryRequestData(cm.chain.Provider().Height()+1, DataFetchHeightDiffMax)
-			timer.Reset(10 * time.Second)
+			reqTimer.Reset(100 * time.Millisecond)
+		case <-processTimer.C:
+			cm.tryProcess()
+			processTimer.Reset(100 * time.Millisecond)
 		}
-	}
-}
-
-func (cm *Manager) tryProcess() {
-	cm.processLock.Lock()
-	defer cm.processLock.Unlock()
-
-	targetHeight := uint64(cm.Provider().Height() + 1)
-	item := cm.dataQ.PopUntil(targetHeight)
-	for item != nil {
-		cd := item.(*Data)
-		if err := cm.Process(cd, nil); err != nil {
-			return
-		}
-		cm.BroadcastHeader(cd.Header)
-		cm.tryRequestData(cd.Header.Height()+1, DataFetchHeightDiffMax)
-		targetHeight++
-		item = cm.dataQ.PopUntil(targetHeight)
 	}
 }
 
 func (cm *Manager) tryRequestData(From uint32, Count uint32) {
-	cm.requestLock.Lock()
-	defer cm.requestLock.Unlock()
-
 	if Count > DataFetchHeightDiffMax {
 		Count = DataFetchHeightDiffMax
 	}
@@ -279,7 +243,6 @@ func (cm *Manager) tryRequestData(From uint32, Count uint32) {
 					is := ph != nil && ph.Height >= TargetHeight
 					cm.Unlock()
 					if is {
-						//log.Println("SendRequest", TargetHeight, p.ID())
 						sm := &RequestMessage{
 							Height: TargetHeight,
 						}
@@ -293,6 +256,20 @@ func (cm *Manager) tryRequestData(From uint32, Count uint32) {
 				}
 			}
 		}
+	}
+}
+
+func (cm *Manager) tryProcess() {
+	targetHeight := uint64(cm.Provider().Height() + 1)
+	item := cm.dataQ.PopUntil(targetHeight)
+	for item != nil {
+		cd := item.(*Data)
+		if err := cm.Process(cd, nil); err != nil {
+			return
+		}
+		cm.BroadcastHeader(cd.Header)
+		targetHeight++
+		item = cm.dataQ.PopUntil(targetHeight)
 	}
 }
 
@@ -314,32 +291,16 @@ func (cm *Manager) checkFork(fh Header, sigs []common.Signature) error {
 	return nil
 }
 
-// ProcessWithCallback processes the chain data
-func (cm *Manager) ProcessWithCallback(cd *Data, UserData interface{}, pre func(), post func()) error {
-	cm.Lock()
-	defer cm.Unlock()
-
-	if pre != nil {
-		pre()
-	}
-	defer func() {
-		if post != nil {
-			post()
-		}
-	}()
-
-	return cm.processInternal(cd, UserData)
-}
-
 // Process processes the chain data
 func (cm *Manager) Process(cd *Data, UserData interface{}) error {
+	cm.chain.DebugLog("TryLock", "cm.Process")
+
 	cm.Lock()
 	defer cm.Unlock()
 
-	return cm.processInternal(cd, UserData)
-}
+	cm.chain.DebugLog("Lock", "cm.Process")
+	defer cm.chain.DebugLog("Unlock", "cm.Process")
 
-func (cm *Manager) processInternal(cd *Data, UserData interface{}) error {
 	cp := cm.chain.Provider()
 	height := cp.Height()
 	if cd.Header.Height() != height+1 {
