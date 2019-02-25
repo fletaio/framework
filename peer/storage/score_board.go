@@ -38,7 +38,7 @@ func (ps *peerStorage) _getScoreBoard(pt peerGroupType, sb *scoreBoard, score fu
 			break
 		}
 
-		if t, has := score(pi.p.RemoteAddr().String()); has {
+		if t, has := score(pi.p.ID()); has {
 			count++
 			sum += t
 		}

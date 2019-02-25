@@ -29,7 +29,7 @@ var (
 )
 
 type testMessage struct {
-	BaseEventHandler
+	mesh.EventHandler
 	ID string
 	peermessage.PeerList
 	pm       *manager
@@ -55,6 +55,9 @@ func (tm *testMessage) OnClosed(p mesh.Peer) {
 		tm.onClosed(p)
 	}
 }
+
+func (tm *testMessage) OnConnected(p mesh.Peer)    {}
+func (tm *testMessage) OnDisconnected(p mesh.Peer) {}
 
 func upVisulaization(tms []*testMessage) {
 	mc := make(chan simulations.Msg)
@@ -751,6 +754,7 @@ func TestPeerListSpread(t *testing.T) {
 			args: args{
 				ChainCoord: &common.Coordinate{},
 				DefaultRouterConfig: &router.Config{
+					Address: "testid",
 					Network: "mock:",
 					Port:    port,
 					EvilNodeConfig: evilnode.Config{
@@ -778,6 +782,7 @@ func TestPeerListSpread(t *testing.T) {
 
 			creator := func(id int) Manager {
 				rc := &router.Config{
+					Address: tt.args.DefaultRouterConfig.Address + strconv.Itoa(id),
 					Network: tt.args.DefaultRouterConfig.Network + "testid" + strconv.Itoa(id),
 					Port:    tt.args.DefaultRouterConfig.Port,
 					EvilNodeConfig: evilnode.Config{
@@ -791,8 +796,6 @@ func TestPeerListSpread(t *testing.T) {
 				r, _ := router.NewRouter(rc)
 
 				pm, _ := NewManager(tt.args.ChainCoord, r, pc)
-
-				pm.RegisterEventHandler(&BaseEventHandler{})
 
 				return pm
 			}

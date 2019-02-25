@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"runtime"
 	"sort"
 	"strconv"
@@ -133,12 +132,12 @@ func (pm *manager) StartManage() {
 		for {
 			conn, pingTime, err := pm.router.Accept(pm.ChainCoord)
 			if err != nil {
-				pm.errLog(err, conn.RemoteAddr().String())
+				pm.errLog(err, conn.ID())
 				continue
 			}
 
 			// ban check
-			addr := conn.RemoteAddr().String()
+			addr := conn.ID()
 			if pm.BanPeerInfos.IsBan(addr) {
 				if hp, has := pm.connections.Load(addr); has {
 					hp.Close()
@@ -148,7 +147,7 @@ func (pm *manager) StartManage() {
 				continue
 			}
 
-			go func(conn net.Conn) {
+			go func(conn router.Conn) {
 				peer := newPeer(conn, pingTime, pm.deletePeer, pm.onRecvEventHandler)
 				if err != nil {
 					pm.errLog("StartManage BeforeConnect event err ", err)
@@ -186,7 +185,7 @@ func (pm *manager) onRecvEventHandler(p *peer, t message.Type) error {
 			if err == message.ErrUnknownMessage {
 				continue
 			}
-			pm.errLog("onRecvEventHandler ", err, " local ", p.LocalAddr().String(), "remote", p.RemoteAddr().String())
+			pm.errLog("onRecvEventHandler ", err, " local ", p.LocalAddr().String(), "remote", p.ID())
 			return err
 		}
 		break
@@ -404,7 +403,7 @@ func (pm *manager) appendPeerStorage() {
 
 	if pm.connections.Len() == 1 {
 		pm.connections.Range(func(k string, p Peer) bool {
-			log.Info("send request list ", p.LocalAddr().String(), " to ", p.RemoteAddr().String())
+			log.Info("send request list ", p.LocalAddr().String(), " to ", p.ID())
 			peermessage.SendRequestPeerList(p, p.LocalAddr().String())
 			return false
 		})
@@ -466,10 +465,10 @@ func (pm *manager) addPeer(p Peer) error {
 
 	if _, has := pm.connections.Load(p.NetAddr()); has {
 		p.Close()
-		pm.errLog("addPeer, ", ErrIsAlreadyConnected, p.RemoteAddr().String())
+		pm.errLog("addPeer, ", ErrIsAlreadyConnected, p.ID())
 		return ErrIsAlreadyConnected
 	} else {
-		addr := p.NetAddr() // .RemoteAddr().String()
+		addr := p.NetAddr()
 		pm.connections.Store(addr, p)
 		pm.nodes.Store(addr, peermessage.NewConnectInfo(addr, p.PingTime()))
 		pm.candidates.store(addr, csPeerListWait)

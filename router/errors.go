@@ -17,4 +17,6 @@ var (
 	ErrNotFoundPort              = errors.New("not found port")
 	ErrCanNotConnectToEvilNode   = errors.New("can not connect to evil node")
 	ErrWriteTimeout              = errors.New("write timeout")
+	ErrNotHandshakeFormate       = errors.New("not handshake formate")
+	ErrPeerTimeout               = errors.New("peer timeout")
 )

@@ -91,6 +91,11 @@ func (l *logicalConnection) LocalAddr() net.Addr {
 	return l.PConn.LocalAddr()
 }
 
+//ID is Node ID
+func (l *logicalConnection) ID() string {
+	return l.PConn.ID()
+}
+
 //RemoteAddr is remote address infomation
 func (l *logicalConnection) RemoteAddr() net.Addr {
 	return l.PConn.RemoteAddr()
@@ -105,7 +110,7 @@ func (l *logicalConnection) sendToLogical(data []byte) {
 func (l *logicalConnection) Close() error {
 	if l.isClosed != true {
 		l.isClosed = true
-		log.Debug("receiver close ", l.LocalAddr().String(), " ", l.RemoteAddr().String())
+		log.Debug("receiver close ", l.LocalAddr().String(), " ", l.ID())
 		l.PConn.sendClose(l.ChainCoord)
 		close(l.sendChan)
 		l.close <- true

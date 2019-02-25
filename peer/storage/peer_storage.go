@@ -2,7 +2,6 @@ package storage
 
 import (
 	"errors"
-	"net"
 	"sort"
 	"strconv"
 	"time"
@@ -69,8 +68,7 @@ type PeerStorage interface {
 
 // Peer is a functional list of Peer structures to be used internally.
 type Peer interface {
-	RemoteAddr() net.Addr
-	LocalAddr() net.Addr
+	ID() string
 	PingTime() time.Duration
 	IsClose() bool
 }
@@ -121,7 +119,7 @@ func (p *peerInfomation) score() (t time.Duration) {
 //Add a new peer
 //Scores the peer and determines whether it is included in the group.
 func (ps *peerStorage) Add(p Peer, score Score) (inserted bool) {
-	addr := p.RemoteAddr().String()
+	addr := p.ID()
 	t := p.PingTime()
 
 	if _, has := ps.peerMap[addr]; has {
@@ -177,19 +175,19 @@ func (ps *peerStorage) List() []string {
 	for _, pi := range ps.peerGroup[group1] {
 		if pi != nil {
 			index++
-			list = append(list, strconv.Itoa(index)+":"+pi.p.RemoteAddr().String()+":"+pi.score().String()+":"+pi.p.PingTime().String())
+			list = append(list, strconv.Itoa(index)+":"+pi.p.ID()+":"+pi.score().String()+":"+pi.p.PingTime().String())
 		}
 	}
 	for _, pi := range ps.peerGroup[group2] {
 		if pi != nil {
 			index++
-			list = append(list, strconv.Itoa(index)+":"+pi.p.RemoteAddr().String()+":"+pi.score().String()+":"+pi.p.PingTime().String())
+			list = append(list, strconv.Itoa(index)+":"+pi.p.ID()+":"+pi.score().String()+":"+pi.p.PingTime().String())
 		}
 	}
 	for _, pi := range ps.peerGroup[group3] {
 		if pi != nil {
 			index++
-			list = append(list, strconv.Itoa(index)+":"+pi.p.RemoteAddr().String()+":"+pi.score().String()+":"+pi.p.PingTime().String())
+			list = append(list, strconv.Itoa(index)+":"+pi.p.ID()+":"+pi.score().String()+":"+pi.p.PingTime().String())
 		}
 	}
 
@@ -219,7 +217,7 @@ func (ps *peerStorage) insertSort(p *peerInfomation) bool {
 	} else if p.group > group2 && ps.insert(p, group2) {
 	} else if p.group > group1 && ps.insert(p, group1) {
 	} else {
-		log.Debug("close peer ", p.p.LocalAddr(), " ", p.p.RemoteAddr())
+		log.Debug("close peer ", p.p.ID())
 		ps.kickOut(p.p)
 		// p.p.Close()
 		return false
@@ -241,12 +239,12 @@ func (ps *peerStorage) insert(p *peerInfomation, pt peerGroupType) bool {
 			deleteEl := nl[groupLength-1]
 			copy(nl[index+1:], nl[index:groupLength])
 			nl[index] = p
-			ps.peerMap[p.p.RemoteAddr().String()] = p
+			ps.peerMap[p.p.ID()] = p
 			if deleteEl != nil {
-				delete(ps.peerMap, deleteEl.p.RemoteAddr().String())
+				delete(ps.peerMap, deleteEl.p.ID())
 				ps.insertSort(deleteEl)
 			}
-			log.Debug("peer insert ", p.p.LocalAddr().String(), ":", p.p.RemoteAddr().String())
+			log.Debug("peer insert ", ":", p.p.ID())
 			return true
 		}
 	}

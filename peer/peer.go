@@ -10,6 +10,7 @@ import (
 	"git.fleta.io/fleta/common/util"
 	"git.fleta.io/fleta/framework/log"
 	"git.fleta.io/fleta/framework/message"
+	"git.fleta.io/fleta/framework/router"
 )
 
 //Peer is manages connections between nodes that cause logical connections.
@@ -26,7 +27,7 @@ type Peer interface {
 
 type onRecv func(p *peer, t message.Type) error
 type peer struct {
-	net.Conn
+	router.Conn
 	pingTime time.Duration
 	score    int64
 	closed   bool
@@ -40,7 +41,7 @@ type peer struct {
 }
 
 //NewPeer is the peer creator.
-func newPeer(conn net.Conn, pingTime time.Duration, deletePeer func(addr string), OnRecvEventHandler onRecv) *peer {
+func newPeer(conn router.Conn, pingTime time.Duration, deletePeer func(addr string), OnRecvEventHandler onRecv) *peer {
 	p := &peer{
 		Conn:               conn,
 		pingTime:           pingTime,
@@ -63,11 +64,11 @@ func (p *peer) NetAddr() string {
 	// }
 
 	// //:으로 나눈 마지막을 port로 취급
-	// addrs := strings.Split(p.Conn.RemoteAddr().String(), ":")
+	// addrs := strings.Split(p.Conn.ID(), ":")
 	// addr := strings.Join(addrs[:len(addrs)-1], ":")
 
 	// return addr
-	return p.Conn.RemoteAddr().String()
+	return p.Conn.ID()
 }
 
 func (p *peer) ConnectedTime() int64 {

@@ -18,6 +18,7 @@ import (
 // Config is router config
 type Config struct {
 	Network        string
+	Address        string
 	Port           int
 	EvilNodeConfig evilnode.Config
 }
@@ -26,7 +27,7 @@ type Config struct {
 type Router interface {
 	AddListen(ChainCoord *common.Coordinate) error
 	Request(addrStr string, ChainCoord *common.Coordinate) error
-	Accept(ChainCoord *common.Coordinate) (net.Conn, time.Duration, error)
+	Accept(ChainCoord *common.Coordinate) (Conn, time.Duration, error)
 	Localhost() string
 	EvilNodeManager() *evilnode.Manager
 	Conf() *Config
@@ -101,13 +102,14 @@ func (r *router) Request(addr string, ChainCoord *common.Coordinate) error {
 	r.PConn.lock("Request")
 	defer r.PConn.unlock()
 
-	pConn, has := r.PConn.load(addr)
+	_, has := r.PConn.load(addr)
 	if !has {
 		conn, err := network.DialTimeout(r.Config.Network, addr, time.Second*2)
 		if err != nil {
 			return err
 		}
-		pConn, err = r.incommingConn(conn)
+
+		_, err = r.incommingConn(conn, ChainCoord)
 		if err != nil {
 			if err == ErrCanNotConnectToEvilNode {
 				conn.Close()
@@ -115,18 +117,17 @@ func (r *router) Request(addr string, ChainCoord *common.Coordinate) error {
 			return err
 		}
 	}
-	pConn.handshake(ChainCoord)
 
 	// conn, err := network.Dial(r.Config.Network, addr)
 	return nil
 }
 
 // Accept returns a logical connection when an external connection request is received.
-func (r *router) Accept(ChainCoord *common.Coordinate) (net.Conn, time.Duration, error) {
+func (r *router) Accept(ChainCoord *common.Coordinate) (Conn, time.Duration, error) {
 	ch := r.ReceiverChan.load(r.Config.Port, *ChainCoord)
 
 	receiver := <-ch
-	var c net.Conn
+	var c Conn
 	c = receiver
 	return c, receiver.ping, nil
 }
@@ -157,7 +158,7 @@ func (r *router) listening(l net.Listener) {
 				continue
 			}
 			r.PConn.lock("listening")
-			_, err = r.incommingConn(conn)
+			_, err = r.incommingConn(conn, nil)
 			if err != nil {
 				if err == ErrCanNotConnectToEvilNode {
 					conn.Close()
@@ -174,30 +175,64 @@ func (r *router) listening(l net.Listener) {
 	}
 }
 
-func (r *router) incommingConn(conn net.Conn) (*physicalConnection, error) {
+func (r *router) incommingConn(conn net.Conn, ChainCoord *common.Coordinate) (*physicalConnection, error) {
 	if r.localhost == "" {
 		r.setLocalhost(conn.LocalAddr().String())
 	}
 
 	addr := conn.RemoteAddr().String()
+	if raddr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
+		addr = raddr.IP.String()
+	}
 	if r.evilNodeManager.IsBanNode(addr) {
 		return nil, ErrCanNotConnectToEvilNode
 	}
 
-	_, has := r.PConn.load(addr)
+	oldPConn, has := r.PConn.load(addr)
 	var pc *physicalConnection
 	if has {
+		oldPConn.Close()
 		log.Debug("router duplicate conn close ", r.Localhost, " ", conn.RemoteAddr().String())
-		conn.Close()
-	} else {
-		log.Debug("router run ", r.Localhost, " ", conn.RemoteAddr().String())
-		pc = newPhysicalConnection(addr, conn, r)
-		r.PConn.store(addr, pc)
-		go pc.run()
 	}
+	pc = newPhysicalConnection(addr, conn, r)
+	r.PConn.store(addr, pc)
+
+	errCh := make(chan error)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func(pc *physicalConnection) {
+		wg.Done()
+
+		err := pc.doHandshake()
+		if err != nil {
+			pc.Close()
+		}
+		errCh <- err
+	}(pc)
+	if ChainCoord != nil {
+		pc.handshake(ChainCoord)
+	}
+	wg.Wait()
+	deadTimer := time.NewTimer(5 * time.Second)
+	select {
+	case <-deadTimer.C:
+		pc.Close()
+		return nil, ErrPeerTimeout
+	case err := <-errCh:
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	go pc.run()
 	return pc, nil
 }
-
+func (r *router) localAddress() string {
+	return r.Config.Address
+}
+func (r *router) port() int {
+	return r.Config.Port
+}
 func (r *router) acceptConn(conn *logicalConnection, ChainCoord *common.Coordinate) error {
 	ch := r.ReceiverChan.load(r.Config.Port, *ChainCoord)
 	ch <- conn
@@ -209,7 +244,11 @@ func (r *router) removePhysicalConnenction(pc *physicalConnection) error {
 	r.PConn.lock("removePhysicalConnenction")
 	defer r.PConn.unlock()
 
-	r.PConn.delete(pc.RemoteAddr().String())
+	addr := pc.RemoteAddr().String()
+	if raddr, ok := pc.RemoteAddr().(*net.TCPAddr); ok {
+		addr = raddr.IP.String()
+	}
+	r.PConn.delete(addr)
 	return pc.Close()
 }
 

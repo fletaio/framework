@@ -268,7 +268,7 @@ func Test_router_MultyCoord_Connecte_send(t *testing.T) {
 					Network: "mock:send1",
 					Port:    Port,
 					EvilNodeConfig: evilnode.Config{
-						StorePath:    "./test/send1/",
+						StorePath:    "./test/send3/",
 						BanEvilScore: 100,
 					},
 				},
@@ -276,7 +276,7 @@ func Test_router_MultyCoord_Connecte_send(t *testing.T) {
 					Network: "mock:send2",
 					Port:    Port,
 					EvilNodeConfig: evilnode.Config{
-						StorePath:    "./test/send2/",
+						StorePath:    "./test/send4/",
 						BanEvilScore: 100,
 					},
 				},
@@ -284,7 +284,7 @@ func Test_router_MultyCoord_Connecte_send(t *testing.T) {
 					Network: "mock:send3",
 					Port:    Port,
 					EvilNodeConfig: evilnode.Config{
-						StorePath:    "./test/send3/",
+						StorePath:    "./test/send5/",
 						BanEvilScore: 100,
 					},
 				},
@@ -668,6 +668,100 @@ func Test_Compress(t *testing.T) {
 					},
 				},
 				Config2: &Config{
+					Network: "mock:Compress2",
+					Port:    Port,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    "./test/Compress2/",
+						BanEvilScore: 100,
+					},
+				},
+			},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r1, _ := NewRouter(tt.args.Config1)
+			r2, _ := NewRouter(tt.args.Config2)
+
+			r1.AddListen(tt.args.ChainCoord)
+			r2.AddListen(tt.args.ChainCoord)
+
+			r2.Request(fmt.Sprintf("Compress1:%v", Port), tt.args.ChainCoord)
+
+			wg := sync.WaitGroup{}
+			wg.Add(2)
+
+			msg := make([]byte, 1024*1025)
+			for i := 0; i < len(msg); i++ {
+				msg[i] = uint8(rand.Uint32() / 4)
+			}
+
+			var readConn net.Conn
+			var writeConn net.Conn
+			go func() {
+				conn, _, _ := r1.Accept(tt.args.ChainCoord)
+				readConn = conn
+				wg.Done()
+			}()
+			go func() {
+				conn, _, _ := r2.Accept(tt.args.ChainCoord)
+				writeConn = conn
+				wg.Done()
+			}()
+			wg.Wait()
+
+			wg.Add(1)
+			strChan := make(chan string)
+			go func() {
+				wg.Wait()
+				bs := make([]byte, 1024*1025)
+				n, _ := readConn.Read(bs)
+				strChan <- string(bs[:n])
+			}()
+
+			go func() {
+				writeConn.Write(msg)
+				wg.Done()
+			}()
+
+			result := <-strChan
+
+			if (result == string(msg)) != tt.want {
+				t.Errorf("result = %v, want %v", result, tt.want)
+			}
+		})
+	}
+}
+
+func Test_Addr(t *testing.T) {
+	var Port = _port
+	_port++
+	type args struct {
+		ChainCoord *common.Coordinate
+		Config1    *Config
+		Config2    *Config
+	}
+	tests := []struct {
+		name string
+		args args
+		want bool
+	}{
+		{
+			name: "string",
+			args: args{
+				ChainCoord: &common.Coordinate{},
+				Config1: &Config{
+					Address: "test1",
+					Network: "mock:Compress1",
+					Port:    Port,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    "./test/Compress1/",
+						BanEvilScore: 100,
+					},
+				},
+				Config2: &Config{
+					Address: "test2",
 					Network: "mock:Compress2",
 					Port:    Port,
 					EvilNodeConfig: evilnode.Config{
