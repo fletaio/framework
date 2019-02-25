@@ -99,11 +99,13 @@ func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 
 	switch msg := m.(type) {
 	case *HeaderMessage:
-		// log.Println("HeaderMessage", msg.Header.Height(), p.ID())
+		//log.Println("HeaderMessage", msg.Header.Height(), p.ID())
 		cm.Lock()
 		if status, has := cm.statusMap[p.ID()]; has {
 			if status.Height < msg.Header.Height() {
+				status.Version = msg.Header.Version()
 				status.Height = msg.Header.Height()
+				status.LastHash = msg.Header.Hash()
 			}
 		}
 		cm.Unlock()
@@ -131,7 +133,9 @@ func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 		cm.Lock()
 		if status, has := cm.statusMap[p.ID()]; has {
 			if status.Height < msg.Data.Header.Height() {
+				status.Version = msg.Data.Header.Version()
 				status.Height = msg.Data.Header.Height()
+				status.LastHash = msg.Data.Header.Hash()
 			}
 		}
 		cm.Unlock()
