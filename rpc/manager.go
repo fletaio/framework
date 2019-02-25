@@ -57,6 +57,7 @@ type Manager struct {
 	sync.Mutex
 	e            *echo.Echo
 	funcMap      map[string]Handler
+	eventLocker  []*sync.Mutex
 	eventWatcher []*websocket.Conn
 }
 
@@ -65,6 +66,7 @@ func NewManager() *Manager {
 	rm := &Manager{
 		e:            echo.New(),
 		funcMap:      map[string]Handler{},
+		eventLocker:  []*sync.Mutex{},
 		eventWatcher: []*websocket.Conn{},
 	}
 	return rm
@@ -117,9 +119,13 @@ func (rm *Manager) handleJRPC(kn *kernel.Kernel, req *JRPCRequest) *JRPCResponse
 
 func (rm *Manager) handleEvent(noti *EventNotify) {
 	conns := []*websocket.Conn{}
+	locks := []*sync.Mutex{}
 	rm.Lock()
 	for _, conn := range rm.eventWatcher {
 		conns = append(conns, conn)
+	}
+	for _, lock := range rm.eventLocker {
+		locks = append(locks, lock)
 	}
 	rm.Unlock()
 
@@ -127,25 +133,29 @@ func (rm *Manager) handleEvent(noti *EventNotify) {
 	if err != nil {
 		return
 	}
-	for _, conn := range conns {
-		errCh := make(chan error)
-		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			wg.Done()
-			err := conn.WriteMessage(websocket.TextMessage, data)
-			errCh <- err
-		}()
-		wg.Wait()
-		deadTimer := time.NewTimer(5 * time.Second)
-		select {
-		case <-deadTimer.C:
-			conn.Close()
-		case <-errCh:
-			if err != nil {
+	for i := range conns {
+		func(conn *websocket.Conn, lock *sync.Mutex) {
+			errCh := make(chan error)
+			var wg sync.WaitGroup
+			wg.Add(1)
+			go func() {
+				wg.Done()
+				(*lock).Lock()
+				err := conn.WriteMessage(websocket.TextMessage, data)
+				(*lock).Unlock()
+				errCh <- err
+			}()
+			wg.Wait()
+			deadTimer := time.NewTimer(5 * time.Second)
+			select {
+			case <-deadTimer.C:
 				conn.Close()
+			case <-errCh:
+				if err != nil {
+					conn.Close()
+				}
 			}
-		}
+		}(conns[i], locks[i])
 	}
 }
 
@@ -188,17 +198,21 @@ func (rm *Manager) Run(kn *kernel.Kernel, Bind string) error {
 		case "event":
 			rm.Lock()
 			rm.eventWatcher = append(rm.eventWatcher, conn)
+			rm.eventLocker = append(rm.eventLocker, &sync.Mutex{})
 			rm.Unlock()
 
 			defer func() {
 				rm.Lock()
 				eventWatcher := []*websocket.Conn{}
-				for _, c := range rm.eventWatcher {
+				eventLocker := []*sync.Mutex{}
+				for i, c := range rm.eventWatcher {
 					if c != conn {
 						eventWatcher = append(eventWatcher, c)
+						eventLocker = append(eventLocker, rm.eventLocker[i])
 					}
 				}
 				rm.eventWatcher = eventWatcher
+				rm.eventLocker = eventLocker
 				rm.Unlock()
 			}()
 			for {
@@ -290,12 +304,15 @@ func (rm *Manager) DoTransactionBroadcast(kn *kernel.Kernel, msg *message_def.Tr
 	})
 }
 
-// DebugLog TEMP
+// DebugLog provides internal debug logs to handlers
 func (rm *Manager) DebugLog(kn *kernel.Kernel, args ...interface{}) {
-	rm.handleEvent(&EventNotify{
-		Type: "DebugLog",
-		Data: map[string]interface{}{
-			"log": fmt.Sprint(args...),
-		},
-	})
+	if len(args) > 0 {
+		str := fmt.Sprintln(args...)
+		rm.handleEvent(&EventNotify{
+			Type: "DebugLog",
+			Data: map[string]interface{}{
+				"log": str[:len(str)-1],
+			},
+		})
+	}
 }
