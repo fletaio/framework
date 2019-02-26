@@ -38,6 +38,7 @@ type Manager interface {
 	EnforceConnect()
 	AddNode(addr string) error
 	BroadCast(m message.Message)
+	BroadCastLimit(m message.Message, Limint int)
 	NodeList() []string
 	ConnectedList() []string
 	TargetCast(addr string, m message.Message) error
@@ -234,6 +235,16 @@ func (pm *manager) BroadCast(m message.Message) {
 	pm.connections.Range(func(addr string, p Peer) bool {
 		p.Send(m)
 		return true
+	})
+}
+
+//BroadCastLimit is used to propagate messages to limited number of nodes.
+func (pm *manager) BroadCastLimit(m message.Message, Limit int) {
+	Count := 0
+	pm.connections.Range(func(addr string, p Peer) bool {
+		p.Send(m)
+		Count++
+		return Count < Limit
 	})
 }
 
