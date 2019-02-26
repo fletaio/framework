@@ -102,18 +102,22 @@ func (l *logicalConnection) RemoteAddr() net.Addr {
 }
 
 //Write is write byte to buffer
-func (l *logicalConnection) sendToLogical(data []byte) {
+func (l *logicalConnection) sendToLogical(data []byte) error {
+	if l.isClosed == true {
+		return io.EOF
+	}
 	l.sendChan <- data
+	return nil
 }
 
 //Close is closes data communication channel
 func (l *logicalConnection) Close() error {
 	if l.isClosed != true {
 		l.isClosed = true
+		l.close <- true
 		log.Debug("receiver close ", l.LocalAddr().String(), " ", l.ID())
 		l.PConn.sendClose(l.ChainCoord)
 		close(l.sendChan)
-		l.close <- true
 	}
 	return nil
 }

@@ -126,7 +126,10 @@ func (pc *physicalConnection) _run() (bool, error) {
 			return false, nil
 		}
 	} else {
-		pc.sendToLogicalConn(body, ChainCoord)
+		err := pc.sendToLogicalConn(body, ChainCoord)
+		if err != nil {
+			return isHandshake, err
+		}
 	}
 	return isHandshake, nil
 }
@@ -335,7 +338,7 @@ func (pc *physicalConnection) sendToLogicalConn(bs []byte, ChainCoord *common.Co
 	defer pc.lConn.unlock()
 
 	if lConn, has := pc.lConn.load(*ChainCoord); has {
-		lConn.sendToLogical(bs)
+		err = lConn.sendToLogical(bs)
 	} else {
 		return ErrNotFoundLogicalConnection
 	}
