@@ -150,6 +150,7 @@ func (rm *Manager) handleEvent(noti *EventNotify) {
 			select {
 			case <-deadTimer.C:
 				conn.Close()
+				<-errCh
 			case <-errCh:
 				if err != nil {
 					conn.Close()
@@ -247,7 +248,7 @@ func (rm *Manager) Run(kn *kernel.Kernel, Bind string) error {
 					deadTimer := time.NewTimer(5 * time.Second)
 					select {
 					case <-deadTimer.C:
-						return ErrClientTimeout
+						return <-errCh
 					case <-errCh:
 						if err != nil {
 							return err
@@ -284,24 +285,28 @@ func (rm *Manager) OnPushTransaction(kn *kernel.Kernel, tx transaction.Transacti
 
 // AfterPushTransaction called when pushed a transaction to the transaction pool
 func (rm *Manager) AfterPushTransaction(kn *kernel.Kernel, tx transaction.Transaction, sigs []common.Signature) {
-	rm.handleEvent(&EventNotify{
-		Type: "AfterPushTransaction",
-		Data: map[string]interface{}{
-			"tx_hash": tx.Hash(),
-			"tx":      tx,
-		},
-	})
+	/*
+		rm.handleEvent(&EventNotify{
+			Type: "AfterPushTransaction",
+			Data: map[string]interface{}{
+				"tx_hash": tx.Hash(),
+				"tx":      tx,
+			},
+		})
+	*/
 }
 
 // DoTransactionBroadcast called when a transaction need to be broadcast
 func (rm *Manager) DoTransactionBroadcast(kn *kernel.Kernel, msg *message_def.TransactionMessage) {
-	rm.handleEvent(&EventNotify{
-		Type: "DoTransactionBroadcast",
-		Data: map[string]interface{}{
-			"tx_hash": msg.Tx.Hash(),
-			"tx":      msg.Tx,
-		},
-	})
+	/*
+		rm.handleEvent(&EventNotify{
+			Type: "DoTransactionBroadcast",
+			Data: map[string]interface{}{
+				"tx_hash": msg.Tx.Hash(),
+				"tx":      msg.Tx,
+			},
+		})
+	*/
 }
 
 // DebugLog provides internal debug logs to handlers
@@ -311,7 +316,8 @@ func (rm *Manager) DebugLog(kn *kernel.Kernel, args ...interface{}) {
 		rm.handleEvent(&EventNotify{
 			Type: "DebugLog",
 			Data: map[string]interface{}{
-				"log": str[:len(str)-1],
+				"log":       str[:len(str)-1],
+				"timestamp": time.Now().UnixNano(),
 			},
 		})
 	}
