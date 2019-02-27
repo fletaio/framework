@@ -186,6 +186,7 @@ func (pc *physicalConnection) write(body []byte, ChainCoord *common.Coordinate, 
 		pc.PConn.Close()
 		return wrote, <-errCh
 	case err := <-errCh:
+		deadTimer.Stop()
 		return wrote, err
 	}
 }
