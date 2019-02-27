@@ -146,12 +146,13 @@ func (rm *Manager) handleEvent(noti *EventNotify) {
 				errCh <- err
 			}()
 			wg.Wait()
-			deadTimer := time.NewTimer(5 * time.Second)
+			deadTimer := time.NewTimer(15 * time.Second)
 			select {
 			case <-deadTimer.C:
 				conn.Close()
 				<-errCh
 			case <-errCh:
+				deadTimer.Stop()
 				if err != nil {
 					conn.Close()
 				}
@@ -248,8 +249,10 @@ func (rm *Manager) Run(kn *kernel.Kernel, Bind string) error {
 					deadTimer := time.NewTimer(5 * time.Second)
 					select {
 					case <-deadTimer.C:
+						conn.Close()
 						return <-errCh
 					case <-errCh:
+						deadTimer.Stop()
 						if err != nil {
 							return err
 						}
