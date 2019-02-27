@@ -249,7 +249,7 @@ func (pc *physicalConnection) write(body []byte, ChainCoord *common.Coordinate, 
 	select {
 	case <-deadTimer.C:
 		pc.PConn.Close()
-		return wrote, ErrWriteTimeout
+		return wrote, <-errCh
 	case err := <-errCh:
 		return wrote, err
 	}
@@ -320,17 +320,11 @@ func (pc *physicalConnection) readConn() (body []byte, isHandshake bool, ChainCo
 }
 
 func (pc *physicalConnection) readBytes(n uint32) (read []byte, returnErr error) {
-	readedN := uint32(0)
-	for readedN < n {
-		bs := make([]byte, n-readedN)
-		readN, err := pc.PConn.Read(bs)
-		if err != nil {
-			return read, err
-		}
-		readedN += uint32(readN)
-		read = append(read, bs[:readN]...)
+	bs := make([]byte, n)
+	if _, err := util.FillBytes(pc.PConn, bs); err != nil {
+		return nil, err
 	}
-	return
+	return bs, nil
 }
 
 func (pc *physicalConnection) sendToLogicalConn(bs []byte, ChainCoord *common.Coordinate) (err error) {
