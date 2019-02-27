@@ -15,6 +15,12 @@ type addr struct {
 	address string
 }
 
+type dataCase struct {
+	data   []byte
+	size   int
+	readed int
+}
+
 func (c *addr) Network() string {
 	return c.network
 }
@@ -31,6 +37,7 @@ type logicalConnection struct {
 	readBuf    bytes.Buffer
 	isClosed   bool
 	close      chan<- bool
+	c          *dataCase
 }
 
 func newLConn(sendPConn physicalWriter, ChainCoord *common.Coordinate, ping time.Duration, close chan<- bool) *logicalConnection {
@@ -50,19 +57,26 @@ func (l *logicalConnection) Read(b []byte) (int, error) {
 	if l.readBuf.Len() == 0 {
 		data, ok := <-l.recvChan
 		if !ok {
-			l.Close()
 			return 0, io.EOF
 		}
-		if len(b) >= len(data) {
-			copy(b[:], data[:len(data)])
-			return len(data), nil
+		l.c = &dataCase{
+			data: data,
+			size: len(data),
 		}
-		copy(b[:], data[:len(b)])
-		l.readBuf.Write(data[len(b):])
+
+		if len(b) >= len(l.c.data) {
+			copy(b[:], l.c.data[:len(l.c.data)])
+			l.c.readed += len(l.c.data)
+			return len(l.c.data), nil
+		}
+		copy(b[:], l.c.data[:len(b)])
+		l.readBuf.Write(l.c.data[len(b):])
+		l.c.readed += len(b)
 		return len(b), nil
 	}
 
 	n, err := l.readBuf.Read(b)
+	l.c.readed += n
 	return n, err
 }
 
@@ -96,6 +110,17 @@ func (l *logicalConnection) ID() string {
 	return l.PConn.ID()
 }
 
+func (l *logicalConnection) Reset() {
+	bs := make([]byte, l.c.size-l.c.readed)
+	log.Info(string(l.c.data))
+	l.readBuf.Read(bs)
+
+}
+
+func (l *logicalConnection) PrintData() string {
+	return string(l.c.data)
+}
+
 //RemoteAddr is remote address infomation
 func (l *logicalConnection) RemoteAddr() net.Addr {
 	return l.PConn.RemoteAddr()
@@ -116,7 +141,6 @@ func (l *logicalConnection) Close() error {
 		l.isClosed = true
 		l.close <- true
 		log.Debug("receiver close ", l.LocalAddr().String(), " ", l.ID())
-		l.PConn.sendClose(l.ChainCoord)
 		close(l.sendChan)
 	}
 	return nil

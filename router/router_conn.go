@@ -8,4 +8,6 @@ import "net"
 type Conn interface {
 	net.Conn
 	ID() string
+	Reset()
+	PrintData() string
 }

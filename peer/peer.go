@@ -80,8 +80,15 @@ func (p *peer) Start() {
 }
 
 func (p *peer) readPacket() {
+	defer func() {
+		p.Close()
+	}()
 	for !p.closed {
 		t, n, err := util.ReadUint64(p)
+		if n != 0 && message.NameOfType(message.Type(t)) == "" {
+			p.Reset()
+			continue
+		}
 		if err != nil {
 			if err != io.EOF {
 				log.Error("recv read type error : ", err)

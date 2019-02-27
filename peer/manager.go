@@ -64,6 +64,8 @@ type manager struct {
 	eventHandlerLock sync.RWMutex
 	eventHandler     []mesh.EventHandler
 	BanPeerInfos     *ByTime
+
+	TestMsg string
 }
 
 type candidateState int
@@ -232,10 +234,13 @@ func (pm *manager) AddNode(addr string) error {
 
 //BroadCast is used to propagate messages to all nodes.
 func (pm *manager) BroadCast(m message.Message) {
+	sendList := []string{}
 	pm.connections.Range(func(addr string, p Peer) bool {
 		p.Send(m)
+		sendList = append(sendList, p.ID())
 		return true
 	})
+	log.Info(pm.router.Localhost(), strings.Join(sendList, ","))
 }
 
 //BroadCastLimit is used to propagate messages to limited number of nodes.
@@ -258,33 +263,48 @@ func (pm *manager) ExceptCast(exceptAddr string, m message.Message) {
 	})
 }
 
-//NodeList is returns the addresses of the collected peers
-func (pm *manager) NodeList() []string {
-	list := make([]string, 0)
-	pm.nodes.Range(func(addr string, ci peermessage.ConnectInfo) bool {
-		list = append(list, addr+":"+strconv.Itoa(ci.PingScoreBoard.Len()))
-		return true
-	})
-	return list
-}
-
-//CandidateList is returns the address of the node waiting for the operation.
-func (pm *manager) ConnectedList() []string {
-	list := make([]string, pm.connections.Len())
-	pm.connections.Range(func(addr string, p Peer) bool {
-		list = append(list, addr)
-		return true
-	})
-	return list
-}
-
-//CandidateList is returns the address of the node waiting for the operation.
+//TargetCast is used to propagate messages to all nodes.
 func (pm *manager) TargetCast(addr string, m message.Message) error {
 	if p, has := pm.connections.Load(addr); has {
 		p.Send(m)
 		return nil
 	}
 	return ErrNotFoundPeer
+}
+
+//NodeList is returns the addresses of the collected peers
+func (pm *manager) TestList() []string {
+	return []string{pm.TestMsg}
+}
+
+//NodeList is returns the addresses of the collected peers
+func (pm *manager) NodeList() []string {
+	list := make([]string, 0)
+	pm.nodes.Range(func(addr string, ci peermessage.ConnectInfo) bool {
+		list = append(list, "no"+addr+":"+strconv.Itoa(ci.PingScoreBoard.Len()))
+		return true
+	})
+	return list
+}
+
+//ConnectedList is returns the address of the node waiting for the operation.
+func (pm *manager) ConnectedList() []string {
+	list := make([]string, 0, pm.connections.Len())
+	pm.connections.Range(func(addr string, p Peer) bool {
+		list = append(list, "co"+addr)
+		return true
+	})
+	return list
+}
+
+//candidateList is returns the address of the node waiting for the operation.
+func (pm *manager) CandidateList() []string {
+	list := make([]string, 0, len(pm.candidates.m))
+	pm.candidates.rangeMap(func(addr string, cs candidateState) bool {
+		list = append(list, "ca"+addr+":"+strconv.Itoa(int(cs)))
+		return true
+	})
+	return list
 }
 
 //GroupList returns a list of peer groups.
@@ -318,6 +338,8 @@ func (pm *manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 
 		} else {
 			pm.peerGroupLock.Lock()
+			defer pm.peerGroupLock.Unlock()
+
 			pm.candidates.delete(peerList.From)
 
 			for _, ci := range peerList.List {
@@ -347,7 +369,6 @@ func (pm *manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 				pm.addReadyConn(p)
 			}
 
-			pm.peerGroupLock.Unlock()
 		}
 
 	}
@@ -369,11 +390,13 @@ func (pm *manager) doManageCandidate(addr string, cs candidateState) error {
 	var err error
 	switch cs {
 	case csRequestWait:
+		// go func(addr string) {
 		err = pm.router.Request(addr, pm.ChainCoord)
 		log.Debug(pm.router.Conf().Network, addr)
 		if err != nil {
 			pm.errLog("RequestWait err ", err)
 		}
+		// }(addr)
 	case csPeerListWait:
 		if p, has := pm.connections.Load(addr); has {
 			peermessage.SendRequestPeerList(p, p.LocalAddr().String())
@@ -386,7 +409,11 @@ func (pm *manager) doManageCandidate(addr string, cs candidateState) error {
 
 func (pm *manager) manageCandidate() {
 	for {
-		time.Sleep(time.Second * 30)
+		if pm.peerStorage.NotEnoughPeer() {
+			time.Sleep(time.Second * 5)
+		} else {
+			time.Sleep(time.Second * 30)
+		}
 		pm.candidates.rangeMap(func(addr string, cs candidateState) bool {
 			pm.doManageCandidate(addr, cs)
 			time.Sleep(time.Millisecond * 50)
@@ -414,7 +441,6 @@ func (pm *manager) appendPeerStorage() {
 
 	if pm.connections.Len() == 1 {
 		pm.connections.Range(func(k string, p Peer) bool {
-			log.Info("send request list ", p.LocalAddr().String(), " to ", p.ID())
 			peermessage.SendRequestPeerList(p, p.LocalAddr().String())
 			return false
 		})
@@ -431,7 +457,7 @@ func (pm *manager) appendPeerStorage() {
 		} else {
 			err := pm.router.Request(p.Address, pm.ChainCoord)
 			if err != nil {
-				pm.errLog("PeerListHandler err ", err)
+				pm.errLog("PeerListHandler err ", pm.router.Localhost(), err)
 			}
 		}
 
