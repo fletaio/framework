@@ -33,8 +33,6 @@ type physicalWriter interface {
 const (
 	MAGICWORD  = 'R'
 	CLOSELCONN = 'C'
-
-	HANDSHAKE = 'H'
 )
 
 //compression types
@@ -84,15 +82,6 @@ func (pc *physicalConnection) ID() string {
 	return pc.Address
 }
 
-func (pc *physicalConnection) doHandshake() error {
-	for {
-		isHandshake, err := pc._run()
-		if err != nil || isHandshake == false {
-			return err
-		}
-	}
-}
-
 func (pc *physicalConnection) run() error {
 	defer func() {
 		if pc.lConn.len() == 0 {
@@ -100,38 +89,20 @@ func (pc *physicalConnection) run() error {
 		}
 	}()
 	for {
-		_, err := pc._run()
+		body, ChainCoord, err := pc.readConn()
+		if err != nil {
+			if err != io.EOF && err != io.ErrClosedPipe {
+				log.Error("physicalConnection end ", err)
+			}
+			pc.Close()
+			log.Debug("physicalConnection run end ", pc.PConn.LocalAddr().String(), " ", pc.PConn.RemoteAddr().String())
+			return err
+		}
+		err = pc.sendToLogicalConn(body, ChainCoord)
 		if err != nil {
 			return err
 		}
 	}
-}
-
-func (pc *physicalConnection) _run() (bool, error) {
-	body, isHandshake, ChainCoord, err := pc.readConn()
-	if err != nil {
-		if err != io.EOF && err != io.ErrClosedPipe {
-			log.Error("physicalConnection end ", err)
-		}
-		pc.Close()
-		log.Debug("physicalConnection run end ", pc.PConn.LocalAddr().String(), " ", pc.PConn.RemoteAddr().String())
-		return isHandshake, err
-	}
-	if isHandshake { // handshake
-		done, err := pc.handshakeProcess(body, ChainCoord)
-		if err != nil {
-			return isHandshake, err
-		}
-		if done == true {
-			return false, nil
-		}
-	} else {
-		err := pc.sendToLogicalConn(body, ChainCoord)
-		if err != nil {
-			return isHandshake, err
-		}
-	}
-	return isHandshake, nil
 }
 
 func (pc *physicalConnection) sendClose(ChainCoord *common.Coordinate) error {
@@ -255,7 +226,7 @@ func (pc *physicalConnection) write(body []byte, ChainCoord *common.Coordinate, 
 	}
 }
 
-func (pc *physicalConnection) readConn() (body []byte, isHandshake bool, ChainCoord *common.Coordinate, returnErr error) {
+func (pc *physicalConnection) readConn() (body []byte, ChainCoord *common.Coordinate, returnErr error) {
 	ChainCoord = &common.Coordinate{}
 	bs, err := pc.readBytes(12) // header 1 + 6 + 1 + 4
 	if err != nil {
@@ -275,10 +246,10 @@ func (pc *physicalConnection) readConn() (body []byte, isHandshake bool, ChainCo
 		return
 	}
 
-	if HANDSHAKE == uint8(bs[0]) {
-		isHandshake = true
-		return
-	}
+	// if HANDSHAKE == uint8(bs[0]) {
+	// 	isHandshake = true
+	// 	return
+	// }
 	if MAGICWORD != uint8(bs[0]) {
 		returnErr = ErrPacketNotStartedMagicword
 		if uint8(bs[0]) == CLOSELCONN {

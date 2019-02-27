@@ -398,7 +398,7 @@ func (pm *manager) manageCandidate() {
 func (pm *manager) rotatePeer() {
 	for {
 		if pm.peerStorage.NotEnoughPeer() {
-			time.Sleep(time.Second * 2)
+			time.Sleep(time.Second * 5)
 		} else {
 			time.Sleep(time.Minute * 20)
 		}

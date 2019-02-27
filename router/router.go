@@ -183,7 +183,11 @@ func (r *router) incommingConn(conn net.Conn, ChainCoord *common.Coordinate) (*p
 	addr := conn.RemoteAddr().String()
 	if raddr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
 		addr = raddr.IP.String()
+	} else {
+		addrs := strings.Split(addr, ":")
+		addr = strings.Join(addrs[:len(addrs)-1], ":")
 	}
+
 	if r.evilNodeManager.IsBanNode(addr) {
 		return nil, ErrCanNotConnectToEvilNode
 	}
@@ -203,15 +207,17 @@ func (r *router) incommingConn(conn net.Conn, ChainCoord *common.Coordinate) (*p
 	go func(pc *physicalConnection) {
 		wg.Done()
 
-		err := pc.doHandshake()
+		if ChainCoord != nil {
+			pc.handshakeSend(ChainCoord)
+		}
+		ChainCoord, err := pc.handshakeRecv()
 		if err != nil {
 			pc.Close()
+		} else {
+			pc.handshakeSend(ChainCoord)
 		}
 		errCh <- err
 	}(pc)
-	if ChainCoord != nil {
-		pc.handshake(ChainCoord)
-	}
 	wg.Wait()
 	deadTimer := time.NewTimer(5 * time.Second)
 	select {
@@ -247,6 +253,9 @@ func (r *router) removePhysicalConnenction(pc *physicalConnection) error {
 	addr := pc.RemoteAddr().String()
 	if raddr, ok := pc.RemoteAddr().(*net.TCPAddr); ok {
 		addr = raddr.IP.String()
+	} else {
+		addrs := strings.Split(addr, ":")
+		addr = strings.Join(addrs[:len(addrs)-1], ":")
 	}
 	r.PConn.delete(addr)
 	return pc.Close()

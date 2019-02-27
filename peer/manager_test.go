@@ -1140,3 +1140,165 @@ func TestNewByTime(t *testing.T) {
 		})
 	}
 }
+
+func Test_manager_BroadCastContinuery(t *testing.T) {
+	testLock.Lock()
+	defer testLock.Unlock()
+	ID := int(atomic.AddInt32(&testID, 1))
+	size := 45
+	path := "./test/Test_manager_BroadCast" + strconv.Itoa(ID)
+	port := testPort + ID
+
+	type args struct {
+		ChainCoord          *common.Coordinate
+		DefaultRouterConfig *router.Config
+		DefaultConfig       *Config
+		IDs                 []int
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    bool
+		wantErr error
+	}{
+		{
+			name: "string",
+			args: args{
+				ChainCoord: &common.Coordinate{},
+				DefaultRouterConfig: &router.Config{
+					Network: "mock:",
+					Port:    port,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    path + "/router",
+						BanEvilScore: 100,
+					},
+				},
+				DefaultConfig: &Config{
+					StorePath: path + "/peer",
+				},
+				IDs: func() []int {
+					IDs := make([]int, 0, size)
+					for i := 0; i < size; i++ {
+						IDs = append(IDs, int(atomic.AddInt32(&testID, 1)))
+					}
+					return IDs
+				}(),
+			},
+			want:    true,
+			wantErr: router.ErrCanNotConnectToEvilNode,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wg := sync.WaitGroup{}
+			wg.Add(size)
+
+			creator := func(id int) *testMessage {
+				rc := &router.Config{
+					Network: tt.args.DefaultRouterConfig.Network + "testid" + strconv.Itoa(id),
+					Port:    tt.args.DefaultRouterConfig.Port,
+					EvilNodeConfig: evilnode.Config{
+						StorePath:    tt.args.DefaultRouterConfig.EvilNodeConfig.StorePath + strconv.Itoa(id) + "/",
+						BanEvilScore: tt.args.DefaultRouterConfig.EvilNodeConfig.BanEvilScore,
+					},
+				}
+				pc := &Config{
+					StorePath: tt.args.DefaultConfig.StorePath + strconv.Itoa(id) + "/",
+				}
+				r, _ := router.NewRouter(rc)
+				pm, _ := NewManager(tt.args.ChainCoord, r, pc)
+				mm := message.NewManager()
+
+				tm := &testMessage{
+					pm: pm,
+					ID: fmt.Sprintf("%v", id),
+				}
+				func(tm *testMessage) {
+					tm.onClosed = func(p mesh.Peer) {
+						// log.Notice("tm.onClosed ", tm.ID, p.ID())
+					}
+					tm.onRecv = func(p mesh.Peer, r io.Reader, t message.Type) error {
+						m, err := mm.ParseMessage(r, t)
+						if err != nil {
+							return err
+						}
+						if t, ok := m.(*testMessage); ok {
+							if len(tm.List) == 0 {
+								wg.Done()
+								log.Info(tm.ID, "Done")
+
+								tm.From = t.From
+								tm.List[strconv.Itoa(len(tm.List))] = peermessage.ConnectInfo{
+									Address: t.From,
+								}
+								tm.pm.BroadCast(tm)
+							}
+
+							return nil
+						}
+						return errors.New("is not test message")
+					}
+					pm.RegisterEventHandler(tm)
+
+					tm.List = map[string]peermessage.ConnectInfo{}
+					mm.SetCreator(testMessageType, func(r io.Reader, mt message.Type) (message.Message, error) {
+						tm := &testMessage{}
+						tm.ReadFrom(r)
+						return tm, nil
+					})
+				}(tm)
+
+				return tm
+			}
+
+			tms := make([]*testMessage, 0, size)
+			for _, id := range tt.args.IDs {
+				tm := creator(id)
+				tm.pm.StartManage()
+				tm.pm.AddNode("testid" + strconv.Itoa(tt.args.IDs[0]))
+				tms = append(tms, tm)
+			}
+
+			upVisulaization(tms)
+
+			for len(tms[len(tms)-1].pm.GroupList()) < 6 {
+				log.Info(len(tms[len(tms)-1].pm.GroupList()))
+
+				var l string
+				for i, t := range tms {
+					if len(t.pm.Peers()) > 0 {
+						l += fmt.Sprintf("%v:%v(%v),", i, len(t.pm.Peers()), tt.args.IDs[i])
+					} else {
+						l += fmt.Sprintf("%v:%v,", i, tt.args.IDs[i])
+					}
+				}
+				log.Notice(l)
+				time.Sleep(time.Second)
+			}
+
+			log.Info("BroadCast init done")
+
+			tms[len(tms)-1].From = "send broadCast"
+			tms[len(tms)-1].pm.BroadCast(tms[len(tms)-1])
+
+			wg.Wait()
+
+			count := 0
+			for _, tm := range tms {
+				for key, ci := range tm.List {
+					log.Info("for key ", key, ", ", ci.Address)
+					str := ci.Address
+					if str == "send broadCast" {
+						count++
+					}
+				}
+			}
+
+			if count < size {
+				t.Errorf("received count %v", count)
+				return
+			}
+
+		})
+	}
+}

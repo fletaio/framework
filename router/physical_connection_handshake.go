@@ -2,10 +2,10 @@ package router
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"time"
 
 	"git.fleta.io/fleta/common/hash"
@@ -86,124 +86,57 @@ func (h *handshake) hash() hash.Hash256 {
 	return hash.Hash(bf.Bytes())
 }
 
-func (pc *physicalConnection) handshakeProcess(body []byte, ChainCoord *common.Coordinate) (bool, error) {
-	log.Debug("response handshake ", body[0], " ", pc.PConn.LocalAddr().String(), " ", pc.PConn.RemoteAddr().String())
-	bf := bytes.NewBuffer(body)
-	if bf.Len() == 0 {
-		return false, ErrNotHandshakeFormate
+func (pc *physicalConnection) handshakeSend(ChainCoord *common.Coordinate) {
+	h := &handshake{
+		RemoteAddr: pc.RemoteAddr().String(),
+		Address:    pc.r.localAddress(),
+		Port:       uint16(pc.r.port()),
+		Time:       uint64(time.Now().UnixNano()),
 	}
+	bf := &bytes.Buffer{}
+	h.WriteTo(bf)
+
+	pc.write(bf.Bytes(), ChainCoord, UNCOMPRESSED)
+}
+
+func (pc *physicalConnection) handshakeRecv() (*common.Coordinate, error) {
+	body, ChainCoord, err := pc.readConn()
+	if err != nil {
+		if err != io.EOF && err != io.ErrClosedPipe {
+			log.Error("physicalConnection end ", err)
+		}
+		pc.Close()
+		log.Debug("physicalConnection run end ", pc.PConn.LocalAddr().String(), " ", pc.PConn.RemoteAddr().String())
+		return nil, err
+	}
+
+	bf := bytes.NewBuffer(body)
 	h := &handshake{}
-	h.ReadFrom(bf)
-	if bf.Len() == 0 {
-		pc.handshakeResponse(ChainCoord, body)
-	} else if bf.Len() > 0 {
-		h2 := &handshake{}
-		h2.ReadFrom(bf)
+	_, err = h.ReadFrom(bf)
+	if err != nil {
+		return nil, err
+	}
 
-		var targetH *handshake
-		if h.RemoteAddr != pc.RemoteAddr().String() {
-			targetH = h
+	if h.Address == "" {
+		addr := pc.RemoteAddr().String()
+		if raddr, ok := pc.RemoteAddr().(*net.TCPAddr); ok {
+			addr = raddr.IP.String()
 		} else {
-			targetH = h2
+			addrs := strings.Split(addr, ":")
+			addr = strings.Join(addrs[:len(addrs)-1], ":")
 		}
 
-		if targetH.Address == "" {
-			addr := pc.RemoteAddr().String()
-			if raddr, ok := pc.RemoteAddr().(*net.TCPAddr); ok {
-				addr = raddr.IP.String()
-			}
-			pc.Address = fmt.Sprintf("%v:%v", addr, targetH.Port)
-		} else {
-			pc.Address = fmt.Sprintf("%v:%v", targetH.Address, targetH.Port)
+		pc.Address = fmt.Sprintf("%v:%v", addr, h.Port)
+	} else {
+		pc.Address = fmt.Sprintf("%v:%v", h.Address, h.Port)
+	}
+	pc.pingTime = time.Now().Sub(time.Unix(0, int64(h.Time)))
+	if conn, new := pc.makeLogicalConnenction(ChainCoord, pc.pingTime); new == true {
+		err := pc.r.acceptConn(conn, ChainCoord)
+		if err != nil {
+			log.Error("physicalConnection run acceptConn err : ", err)
 		}
-
-		pc.pingTime = time.Now().Sub(time.Unix(0, int64(targetH.Time)))
-		if conn, new := pc.makeLogicalConnenction(ChainCoord, pc.pingTime); new == true {
-			err := pc.r.acceptConn(conn, ChainCoord)
-			if err != nil {
-				log.Error("physicalConnection run acceptConn err : ", err)
-			}
-		}
-		pc.handshakeResponse(ChainCoord, body)
-		return true, nil
-	}
-	return false, nil
-}
-
-func (pc *physicalConnection) handshakeByte(ChainCoord *common.Coordinate, body []byte) (result []byte) {
-	result = make([]byte, 0, 13) // 1+6+1+4+1
-
-	result = append(result, HANDSHAKE)
-	result = append(result, ChainCoord.Bytes()...)
-	result = append(result, UNCOMPRESSED)
-
-	BNum := make([]byte, 4)
-	binary.LittleEndian.PutUint32(BNum, uint32(len(body)))
-	result = append(result, BNum...)
-	result = append(result, body...)
-	return
-}
-
-func (pc *physicalConnection) handshakeResponse(ChainCoord *common.Coordinate, body []byte) (wrote int64, err error) {
-	if pc == nil || pc.PConn == nil {
-		return wrote, ErrNotConnected
 	}
 
-	pc.lConn.lock()
-	defer pc.lConn.unlock()
-	_, has := pc.lConn.load(*ChainCoord)
-
-	bf := bytes.NewBuffer(body)
-	if !has {
-		h := &handshake{
-			RemoteAddr: pc.RemoteAddr().String(),
-			Address:    pc.r.localAddress(),
-			Port:       uint16(pc.r.port()),
-			Time:       uint64(time.Now().UnixNano()),
-		}
-		pc.handshakeTimeMap.Store(h.hash(), h)
-		h.WriteTo(bf)
-	}
-
-	return pc._handshake(ChainCoord, bf.Bytes())
-}
-
-func (pc *physicalConnection) handshake(ChainCoord *common.Coordinate) (wrote int64, err error) {
-	if pc == nil || pc.PConn == nil {
-		return wrote, ErrNotConnected
-	}
-
-	pc.lConn.lock()
-	defer pc.lConn.unlock()
-	_, has := pc.lConn.load(*ChainCoord)
-
-	if !has {
-		h := &handshake{
-			RemoteAddr: pc.RemoteAddr().String(),
-			Address:    pc.r.localAddress(),
-			Port:       uint16(pc.r.port()),
-			Time:       uint64(time.Now().UnixNano()),
-		}
-		pc.handshakeTimeMap.Store(h.hash(), h)
-
-		bf := &bytes.Buffer{}
-		h.WriteTo(bf)
-
-		return pc._handshake(ChainCoord, bf.Bytes())
-	}
-
-	return 0, nil
-}
-
-func (pc *physicalConnection) _handshake(ChainCoord *common.Coordinate, body []byte) (wrote int64, err error) {
-	hs := pc.handshakeByte(ChainCoord, body)
-	// go func(hs []byte, ChainCoord *common.Coordinate) {
-	pc.writeLock.Lock()
-	if n, err := pc.PConn.Write(hs); err == nil {
-		wrote = int64(n)
-	}
-	pc.writeLock.Unlock()
-	// }(hs, ChainCoord)
-
-	return wrote, nil
+	return ChainCoord, nil
 }
