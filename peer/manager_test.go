@@ -6,18 +6,19 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"git.fleta.io/fleta/common/util"
 	"git.fleta.io/fleta/network/simulations"
 
 	"git.fleta.io/fleta/common"
 	"git.fleta.io/fleta/framework/chain/mesh"
 	"git.fleta.io/fleta/framework/log"
 	"git.fleta.io/fleta/framework/message"
-	"git.fleta.io/fleta/framework/peer/peermessage"
 	"git.fleta.io/fleta/framework/router"
 	"git.fleta.io/fleta/framework/router/evilnode"
 )
@@ -30,11 +31,96 @@ var (
 
 type testMessage struct {
 	mesh.EventHandler
-	ID string
-	peermessage.PeerList
+	ID       string
+	From     string
+	List     map[string]bool
 	pm       *manager
 	onRecv   func(p mesh.Peer, r io.Reader, t message.Type) error
 	onClosed func(p mesh.Peer)
+	lock     sync.Mutex
+}
+
+// WriteTo is a serialization function
+func (t *testMessage) WriteTo(w io.Writer) (int64, error) {
+	var wrote int64
+	{
+		n, err := util.WriteString(w, t.ID)
+		if err != nil {
+			return wrote, err
+		}
+		wrote += n
+	}
+
+	{
+		n, err := util.WriteString(w, t.From)
+		if err != nil {
+			return wrote, err
+		}
+		wrote += n
+	}
+
+	{
+		listLen := uint32(len(t.List))
+		n, err := util.WriteUint32(w, listLen)
+		if err != nil {
+			return wrote, err
+		}
+		wrote += n
+
+		for k, _ := range t.List {
+			n, err := util.WriteString(w, k)
+			if err != nil {
+				return wrote, err
+			}
+			wrote += n
+		}
+	}
+
+	return wrote, nil
+}
+
+// ReadFrom is a deserialization function
+func (t *testMessage) ReadFrom(r io.Reader) (int64, error) {
+	var read int64
+	{
+		v, n, err := util.ReadString(r)
+		if err != nil {
+			return read, err
+		}
+		read += n
+		t.ID = v
+	}
+
+	{
+		v, n, err := util.ReadString(r)
+		if err != nil {
+			return read, err
+		}
+		read += n
+		t.From = v
+	}
+
+	{
+		v, n, err := util.ReadUint32(r)
+		if err != nil {
+			return read, err
+		}
+		read += n
+		listLen := v
+
+		t.List = map[string]bool{}
+
+		for i := uint32(0); i < listLen; i++ {
+			v, n, err := util.ReadString(r)
+			if err != nil {
+				return read, err
+			}
+			read += n
+			t.List[v] = true
+		}
+	}
+
+	return read, nil
 }
 
 var testMessageType message.Type
@@ -67,8 +153,9 @@ func upVisulaization(tms []*testMessage) {
 				simulations.AddVisualizationData(tm.ID, "id", func(tm *testMessage) func() []string {
 					return func() []string { return []string{tm.ID} }
 				}(tm))
-				simulations.AddVisualizationData(tm.ID, "peer", tm.pm.NodeList)
+				simulations.AddVisualizationData(tm.ID, "peer", tm.pm.ConnectedList)
 				simulations.AddVisualizationData(tm.ID, "group", tm.pm.GroupList)
+				simulations.AddVisualizationData(tm.ID, "test", tm.pm.TestList)
 			}
 			time.Sleep(time.Second)
 		}
@@ -164,9 +251,7 @@ func Test_manager_BroadCast(t *testing.T) {
 								log.Info(tm.ID, "Done")
 
 								tm.From = t.From
-								tm.List[strconv.Itoa(len(tm.List))] = peermessage.ConnectInfo{
-									Address: t.From,
-								}
+								tm.List[strconv.Itoa(len(tm.List))] = true
 								tm.pm.BroadCast(tm)
 							}
 
@@ -176,7 +261,7 @@ func Test_manager_BroadCast(t *testing.T) {
 					}
 					pm.RegisterEventHandler(tm)
 
-					tm.List = map[string]peermessage.ConnectInfo{}
+					tm.List = map[string]bool{}
 					mm.SetCreator(testMessageType, func(r io.Reader, mt message.Type) (message.Message, error) {
 						tm := &testMessage{}
 						tm.ReadFrom(r)
@@ -191,7 +276,7 @@ func Test_manager_BroadCast(t *testing.T) {
 			for _, id := range tt.args.IDs {
 				tm := creator(id)
 				tm.pm.StartManage()
-				tm.pm.AddNode("testid" + strconv.Itoa(tt.args.IDs[0]))
+				tm.pm.AddNode("testid" + strconv.Itoa(tt.args.IDs[0]) + ":" + strconv.Itoa(tt.args.DefaultRouterConfig.Port))
 				tms = append(tms, tm)
 			}
 
@@ -203,9 +288,9 @@ func Test_manager_BroadCast(t *testing.T) {
 				var l string
 				for i, t := range tms {
 					if len(t.pm.Peers()) > 0 {
-						l += fmt.Sprintf("%v:%v(%v),", i, len(t.pm.Peers()), tt.args.IDs[i])
+						l += fmt.Sprintf("%v(%v),", tt.args.IDs[i], len(t.pm.Peers()))
 					} else {
-						l += fmt.Sprintf("%v:%v,", i, tt.args.IDs[i])
+						l += fmt.Sprintf("%v,", tt.args.IDs[i])
 					}
 				}
 				log.Notice(l)
@@ -221,12 +306,9 @@ func Test_manager_BroadCast(t *testing.T) {
 
 			count := 0
 			for _, tm := range tms {
-				for key, ci := range tm.List {
-					log.Info("for key ", key, ", ", ci.Address)
-					str := ci.Address
-					if str == "send broadCast" {
-						count++
-					}
+				for key, _ := range tm.List {
+					log.Info("for key ", key)
+					count++
 				}
 			}
 
@@ -320,9 +402,7 @@ func Test_manager_ExceptCast(t *testing.T) {
 						if t, ok := m.(*testMessage); ok {
 							if len(tm.List) == 0 {
 								wg.Done()
-								tm.List[strconv.Itoa(len(tm.List))] = peermessage.ConnectInfo{
-									Address: t.From,
-								}
+								tm.List[strconv.Itoa(len(tm.List))] = true
 								tm.From = t.From
 								tm.pm.ExceptCast(tm.From, tm)
 							}
@@ -332,7 +412,7 @@ func Test_manager_ExceptCast(t *testing.T) {
 					}
 					pm.RegisterEventHandler(tm)
 
-					tm.List = map[string]peermessage.ConnectInfo{}
+					tm.List = map[string]bool{}
 					mm.SetCreator(testMessageType, func(r io.Reader, mt message.Type) (message.Message, error) {
 						tm := &testMessage{}
 						tm.ReadFrom(r)
@@ -368,12 +448,9 @@ func Test_manager_ExceptCast(t *testing.T) {
 			wg.Wait()
 
 			for _, tm := range tms {
-				for key, ci := range tm.List {
-					log.Info("for key ", key, ", ", ci.Address)
-					str := ci.Address
-					if str == exceptNode {
-						count++
-					}
+				for key, _ := range tm.List {
+					log.Info("for key ", key)
+					count++
 				}
 			}
 
@@ -478,7 +555,7 @@ func Test_target_cast(t *testing.T) {
 					}
 					pm.RegisterEventHandler(tm)
 
-					tm.List = map[string]peermessage.ConnectInfo{}
+					tm.List = map[string]bool{}
 					mm.SetCreator(testMessageType, func(r io.Reader, mt message.Type) (message.Message, error) {
 						tm := &testMessage{}
 						tm.ReadFrom(r)
@@ -1018,9 +1095,7 @@ func Test_multi_chain_send(t *testing.T) {
 						if t, ok := m.(*testMessage); ok {
 							if len(tm.List) == 0 {
 								tm.From = t.From
-								tm.List[strconv.Itoa(len(tm.List))] = peermessage.ConnectInfo{
-									Address: t.From,
-								}
+								tm.List[strconv.Itoa(len(tm.List))] = true
 								tm.pm.BroadCast(tm)
 								wg.Done()
 							}
@@ -1031,7 +1106,7 @@ func Test_multi_chain_send(t *testing.T) {
 					}
 					pm.RegisterEventHandler(tm)
 
-					tm.List = map[string]peermessage.ConnectInfo{}
+					tm.List = map[string]bool{}
 					mm.SetCreator(testMessageType, func(r io.Reader, mt message.Type) (message.Message, error) {
 						tm := &testMessage{}
 						tm.ReadFrom(r)
@@ -1145,7 +1220,7 @@ func Test_manager_BroadCastContinuery(t *testing.T) {
 	testLock.Lock()
 	defer testLock.Unlock()
 	ID := int(atomic.AddInt32(&testID, 1))
-	size := 45
+	size := 40
 	path := "./test/Test_manager_BroadCast" + strconv.Itoa(ID)
 	port := testPort + ID
 
@@ -1190,8 +1265,7 @@ func Test_manager_BroadCastContinuery(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			wg := sync.WaitGroup{}
-			wg.Add(size)
+			doneChan := make(chan bool)
 
 			creator := func(id int) *testMessage {
 				rc := &router.Config{
@@ -1223,24 +1297,28 @@ func Test_manager_BroadCastContinuery(t *testing.T) {
 							return err
 						}
 						if t, ok := m.(*testMessage); ok {
-							if len(tm.List) == 0 {
-								wg.Done()
-								log.Info(tm.ID, "Done")
-
-								tm.From = t.From
-								tm.List[strconv.Itoa(len(tm.List))] = peermessage.ConnectInfo{
-									Address: t.From,
-								}
-								tm.pm.BroadCast(tm)
+							tm.lock.Lock()
+							TestMsg := t.From
+							ts := strings.Split(TestMsg, ":")
+							_, has := tm.List[ts[0]]
+							if !has {
+								tm.List[ts[0]] = true
 							}
-
+							if !has {
+								pm.TestMsg = ts[0]
+								tm.From = TestMsg + ":" + tm.ID
+								doneChan <- true
+								tm.pm.BroadCast(tm)
+								log.Info(tm.ID, "Done", TestMsg)
+							}
+							tm.lock.Unlock()
 							return nil
 						}
 						return errors.New("is not test message")
 					}
 					pm.RegisterEventHandler(tm)
 
-					tm.List = map[string]peermessage.ConnectInfo{}
+					tm.List = map[string]bool{}
 					mm.SetCreator(testMessageType, func(r io.Reader, mt message.Type) (message.Message, error) {
 						tm := &testMessage{}
 						tm.ReadFrom(r)
@@ -1255,7 +1333,7 @@ func Test_manager_BroadCastContinuery(t *testing.T) {
 			for _, id := range tt.args.IDs {
 				tm := creator(id)
 				tm.pm.StartManage()
-				tm.pm.AddNode("testid" + strconv.Itoa(tt.args.IDs[0]))
+				tm.pm.AddNode("testid" + strconv.Itoa(tt.args.IDs[0]) + ":" + strconv.Itoa(tt.args.DefaultRouterConfig.Port))
 				tms = append(tms, tm)
 			}
 
@@ -1267,9 +1345,9 @@ func Test_manager_BroadCastContinuery(t *testing.T) {
 				var l string
 				for i, t := range tms {
 					if len(t.pm.Peers()) > 0 {
-						l += fmt.Sprintf("%v:%v(%v),", i, len(t.pm.Peers()), tt.args.IDs[i])
+						l += fmt.Sprintf("%v(%v),", tt.args.IDs[i], len(t.pm.Peers()))
 					} else {
-						l += fmt.Sprintf("%v:%v,", i, tt.args.IDs[i])
+						l += fmt.Sprintf("%v,", tt.args.IDs[i])
 					}
 				}
 				log.Notice(l)
@@ -1277,26 +1355,24 @@ func Test_manager_BroadCastContinuery(t *testing.T) {
 			}
 
 			log.Info("BroadCast init done")
+			time.Sleep(time.Second * 5)
 
-			tms[len(tms)-1].From = "send broadCast"
+			increseMsg := 1
+			tms[len(tms)-1].From = strconv.Itoa(increseMsg)
+			increseMsg++
 			tms[len(tms)-1].pm.BroadCast(tms[len(tms)-1])
-
-			wg.Wait()
-
-			count := 0
-			for _, tm := range tms {
-				for key, ci := range tm.List {
-					log.Info("for key ", key, ", ", ci.Address)
-					str := ci.Address
-					if str == "send broadCast" {
-						count++
-					}
+			log.Info("first BroadCast sended")
+			countRecv := 0
+			for {
+				<-doneChan
+				countRecv++
+				if countRecv == size {
+					countRecv = 0
+					tms[len(tms)-1].From = "testSend" + strconv.Itoa(increseMsg)
+					tms[len(tms)-1].pm.BroadCast(tms[len(tms)-1])
+					log.Info(increseMsg, "nth BroadCast sended")
+					increseMsg++
 				}
-			}
-
-			if count < size {
-				t.Errorf("received count %v", count)
-				return
 			}
 
 		})

@@ -13,6 +13,12 @@ import (
 	"git.fleta.io/fleta/common"
 	"git.fleta.io/fleta/common/util"
 	"git.fleta.io/fleta/framework/log"
+	"git.fleta.io/fleta/framework/message"
+)
+
+//type define
+var (
+	HandshakeType = message.DefineType("handshake")
 )
 
 type handshake struct {
@@ -25,6 +31,12 @@ type handshake struct {
 // WriteTo is a serialization function
 func (h *handshake) WriteTo(w io.Writer) (int64, error) {
 	var wrote int64
+	if n, err := util.WriteUint64(w, uint64(HandshakeType)); err != nil {
+		return wrote, err
+	} else {
+		wrote += n
+	}
+
 	if n, err := util.WriteString(w, h.RemoteAddr); err != nil {
 		return wrote, err
 	} else {
@@ -52,6 +64,14 @@ func (h *handshake) WriteTo(w io.Writer) (int64, error) {
 // ReadFrom is a deserialization function
 func (h *handshake) ReadFrom(r io.Reader) (int64, error) {
 	var read int64
+	if v, n, err := util.ReadUint64(r); err != nil {
+		return read, err
+	} else {
+		read += n
+		if v != uint64(HandshakeType) {
+			return read, ErrNotHandshakeFormate
+		}
+	}
 	if v, n, err := util.ReadString(r); err != nil {
 		return read, err
 	} else {
@@ -106,7 +126,6 @@ func (pc *physicalConnection) handshakeRecv() (*common.Coordinate, error) {
 			log.Error("physicalConnection end ", err)
 		}
 		pc.Close()
-		log.Debug("physicalConnection run end ", pc.PConn.LocalAddr().String(), " ", pc.PConn.RemoteAddr().String())
 		return nil, err
 	}
 

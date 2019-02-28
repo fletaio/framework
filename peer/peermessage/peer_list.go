@@ -143,20 +143,11 @@ func (p *PeerList) Type() message.Type {
 func (p *PeerList) WriteTo(w io.Writer) (int64, error) {
 	var wrote int64
 	{
-		bsFrom := []byte(p.From)
-
-		fromLen := uint8(len(bsFrom))
-		n, err := util.WriteUint8(w, fromLen)
+		n, err := util.WriteString(w, p.From)
 		if err != nil {
 			return wrote, err
 		}
 		wrote += n
-
-		nint, err := w.Write(bsFrom)
-		if err != nil {
-			return wrote, err
-		}
-		wrote += int64(nint)
 	}
 
 	{
@@ -191,20 +182,12 @@ func (p *PeerList) WriteTo(w io.Writer) (int64, error) {
 func (p *PeerList) ReadFrom(r io.Reader) (int64, error) {
 	var read int64
 	{
-		v, n, err := util.ReadUint8(r)
+		v, n, err := util.ReadString(r)
 		if err != nil {
 			return read, err
 		}
 		read += n
-		fromLen := v
-		fromBs := make([]byte, fromLen)
-
-		nInt, err := r.Read(fromBs)
-		if err != nil {
-			return read, err
-		}
-		read += int64(nInt)
-		p.From = string(fromBs)
+		p.From = v
 	}
 
 	{

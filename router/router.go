@@ -97,12 +97,9 @@ func (r *router) Request(addr string, ChainCoord *common.Coordinate) error {
 		return ErrCanNotConnectToEvilNode
 	}
 
-	addr, _ = removePort(addr)
-	addr = addr + ":" + strconv.Itoa(r.Config.Port)
 	r.PConn.lock("Request")
-	defer r.PConn.unlock()
-
 	_, has := r.PConn.load(addr)
+	r.PConn.unlock()
 	if !has {
 		conn, err := network.DialTimeout(r.Config.Network, addr, time.Second*2)
 		if err != nil {
@@ -157,7 +154,6 @@ func (r *router) listening(l net.Listener) {
 				log.Error("router run err : ", err)
 				continue
 			}
-			r.PConn.lock("listening")
 			_, err = r.incommingConn(conn, nil)
 			if err != nil {
 				if err == ErrCanNotConnectToEvilNode {
@@ -166,7 +162,6 @@ func (r *router) listening(l net.Listener) {
 					log.Error("incommingConn err", err)
 				}
 			}
-			r.PConn.unlock()
 		} else if has {
 			time.Sleep(time.Second * 1)
 		} else {
@@ -192,6 +187,7 @@ func (r *router) incommingConn(conn net.Conn, ChainCoord *common.Coordinate) (*p
 		return nil, ErrCanNotConnectToEvilNode
 	}
 
+	r.PConn.lock("listening")
 	oldPConn, has := r.PConn.load(addr)
 	var pc *physicalConnection
 	if has {
@@ -200,6 +196,7 @@ func (r *router) incommingConn(conn net.Conn, ChainCoord *common.Coordinate) (*p
 	}
 	pc = newPhysicalConnection(addr, conn, r)
 	r.PConn.store(addr, pc)
+	r.PConn.unlock()
 
 	errCh := make(chan error)
 	var wg sync.WaitGroup
@@ -210,12 +207,16 @@ func (r *router) incommingConn(conn net.Conn, ChainCoord *common.Coordinate) (*p
 		if ChainCoord != nil {
 			pc.handshakeSend(ChainCoord)
 		}
-		ChainCoord, err := pc.handshakeRecv()
+		cc, err := pc.handshakeRecv()
 		if err != nil {
 			pc.Close()
 		} else {
-			pc.handshakeSend(ChainCoord)
+			if ChainCoord == nil {
+				ChainCoord = cc
+				pc.handshakeSend(cc)
+			}
 		}
+
 		errCh <- err
 	}(pc)
 	wg.Wait()
