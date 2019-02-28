@@ -234,13 +234,10 @@ func (pm *manager) AddNode(addr string) error {
 
 //BroadCast is used to propagate messages to all nodes.
 func (pm *manager) BroadCast(m message.Message) {
-	sendList := []string{}
 	pm.connections.Range(func(addr string, p Peer) bool {
 		p.Send(m)
-		sendList = append(sendList, p.ID())
 		return true
 	})
-	log.Info(pm.router.Localhost(), strings.Join(sendList, ","))
 }
 
 //BroadCastLimit is used to propagate messages to limited number of nodes.
