@@ -43,6 +43,7 @@ type Manager interface {
 	ConnectedList() []string
 	TargetCast(addr string, m message.Message) error
 	ExceptCast(addr string, m message.Message)
+	ExceptCastLimit(addr string, m message.Message, Limit int)
 }
 
 type manager struct {
@@ -255,6 +256,18 @@ func (pm *manager) ExceptCast(exceptAddr string, m message.Message) {
 			p.Send(m)
 		}
 		return true
+	})
+}
+
+//BroadCast is used to propagate messages to all nodes.
+func (pm *manager) ExceptCastLimit(exceptAddr string, m message.Message, Limit int) {
+	Count := 0
+	pm.connections.Range(func(addr string, p Peer) bool {
+		if exceptAddr != addr {
+			p.Send(m)
+			Count++
+		}
+		return Count < Limit
 	})
 }
 
