@@ -225,6 +225,7 @@ func (r *router) incommingConn(conn net.Conn, ChainCoord *common.Coordinate) (*p
 		pc.Close()
 		return nil, ErrPeerTimeout
 	case err := <-errCh:
+		deadTimer.Stop()
 		if err != nil {
 			return nil, err
 		}
