@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	"git.fleta.io/fleta/common"
@@ -38,6 +39,7 @@ type logicalConnection struct {
 	isClosed   bool
 	close      chan<- bool
 	c          *dataCase
+	closeLock  sync.Mutex
 }
 
 func newLConn(sendPConn physicalWriter, ChainCoord *common.Coordinate, ping time.Duration, close chan<- bool) *logicalConnection {
@@ -137,6 +139,8 @@ func (l *logicalConnection) sendToLogical(data []byte) error {
 
 //Close is closes data communication channel
 func (l *logicalConnection) Close() error {
+	l.closeLock.Lock()
+	defer l.closeLock.Unlock()
 	if l.isClosed != true {
 		l.isClosed = true
 		l.close <- true
