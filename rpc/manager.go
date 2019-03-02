@@ -45,8 +45,9 @@ type JRPCResponse struct {
 
 // EventNotify is a notification of events
 type EventNotify struct {
-	Type string                 `json:"type"`
-	Data map[string]interface{} `json:"data"`
+	Type      string                 `json:"type"`
+	Timestamp int64                  `json:"timestamp"`
+	Data      map[string]interface{} `json:"data"`
 }
 
 // Handler handles a rpc method
@@ -97,6 +98,19 @@ func (rm *Manager) handleJRPC(kn *kernel.Kernel, req *JRPCRequest) *JRPCResponse
 	rm.Lock()
 	fn := rm.funcMap[req.Method]
 	rm.Unlock()
+
+	if fn == nil {
+		if req.ID == nil {
+			return nil
+		} else {
+			res := &JRPCResponse{
+				JSONRPC: req.JSONRPC,
+				ID:      req.ID,
+				Error:   ErrInvalidMethod.Error(),
+			}
+			return res
+		}
+	}
 
 	kn.Lock()
 	ret, err := fn(kn, req.ID, NewArgument(args))
@@ -272,7 +286,8 @@ func (rm *Manager) OnProcessBlock(kn *kernel.Kernel, b *block.Block, s *block.Ob
 // AfterProcessBlock called when processed block to the chain
 func (rm *Manager) AfterProcessBlock(kn *kernel.Kernel, b *block.Block, s *block.ObserverSigned, ctx *data.Context) {
 	rm.handleEvent(&EventNotify{
-		Type: "AfterProcessBlock",
+		Type:      "AfterProcessBlock",
+		Timestamp: time.Now().UnixNano(),
 		Data: map[string]interface{}{
 			"hash":     b.Header.Hash(),
 			"header":   b.Header,
@@ -291,6 +306,7 @@ func (rm *Manager) AfterPushTransaction(kn *kernel.Kernel, tx transaction.Transa
 	/*
 		rm.handleEvent(&EventNotify{
 			Type: "AfterPushTransaction",
+			Timestamp: time.Now().UnixNano(),
 			Data: map[string]interface{}{
 				"tx_hash": tx.Hash(),
 				"tx":      tx,
@@ -304,6 +320,7 @@ func (rm *Manager) DoTransactionBroadcast(kn *kernel.Kernel, msg *message_def.Tr
 	/*
 		rm.handleEvent(&EventNotify{
 			Type: "DoTransactionBroadcast",
+			Timestamp: time.Now().UnixNano(),
 			Data: map[string]interface{}{
 				"tx_hash": msg.Tx.Hash(),
 				"tx":      msg.Tx,
@@ -317,10 +334,10 @@ func (rm *Manager) DebugLog(kn *kernel.Kernel, args ...interface{}) {
 	if len(args) > 0 {
 		str := fmt.Sprintln(args...)
 		rm.handleEvent(&EventNotify{
-			Type: "DebugLog",
+			Type:      "DebugLog",
+			Timestamp: time.Now().UnixNano(),
 			Data: map[string]interface{}{
-				"log":       str[:len(str)-1],
-				"timestamp": time.Now().UnixNano(),
+				"log": str[:len(str)-1],
 			},
 		})
 	}
