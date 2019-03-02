@@ -36,6 +36,8 @@ type Manager struct {
 
 	isRunning    bool
 	requestTimer *RequestTimer
+	requestLock  sync.Mutex
+	processLock  sync.Mutex
 }
 
 // NewManager returns a Manager
@@ -65,9 +67,8 @@ func (cm *Manager) OnConnected(p mesh.Peer) {
 	cm.statusMap[p.ID()] = &Status{}
 	cm.Unlock()
 
-	//log.Println("OnConnected", p.ID())
-
 	cp := cm.Provider()
+	//cm.chain.DebugLog("chain.Manager", cm.chain.Provider().Height(), "Send StatusMessage", cp.Height())
 	p.Send(&StatusMessage{
 		Version:  cp.Version(),
 		Height:   cp.Height(),
@@ -85,8 +86,6 @@ func (cm *Manager) OnDisconnected(p mesh.Peer) {
 
 // OnTimerExpired is called when request is expired
 func (cm *Manager) OnTimerExpired(height uint32, ID string) {
-	//log.Println("OnTimerExpired", height, ID)
-
 	cm.Mesh.RemoveByID(ID)
 }
 
@@ -99,7 +98,7 @@ func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 
 	switch msg := m.(type) {
 	case *HeaderMessage:
-		//log.Println("HeaderMessage", msg.Header.Height(), p.ID())
+		//cm.chain.DebugLog("chain.Manager", cm.chain.Provider().Height(), "HeaderMessage", msg.Header.Height())
 		cm.Lock()
 		if status, has := cm.statusMap[p.ID()]; has {
 			if status.Height < msg.Header.Height() {
@@ -123,7 +122,7 @@ func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 		}
 		return nil
 	case *DataMessage:
-		//log.Println("DataMessage", msg.Data.Header.Height(), p.ID())
+		//cm.chain.DebugLog("chain.Manager", cm.chain.Provider().Height(), "DataMessage", msg.Data.Header.Height())
 		if err := cm.AddData(msg.Data); err != nil {
 			return err
 		}
@@ -141,7 +140,7 @@ func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 		cm.Unlock()
 		return nil
 	case *RequestMessage:
-		//log.Println("RequestMessage", msg.Height, p.ID())
+		//cm.chain.DebugLog("chain.Manager", cm.chain.Provider().Height(), "RequestMessage", msg.Height)
 		cd, err := cm.Provider().Data(msg.Height)
 		if err != nil {
 			return err
@@ -149,12 +148,13 @@ func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 		sm := &DataMessage{
 			Data: cd,
 		}
+		//cm.chain.DebugLog("chain.Manager", cm.chain.Provider().Height(), "Send DataMessage", msg.Height)
 		if err := p.Send(sm); err != nil {
 			return err
 		}
 		return nil
 	case *StatusMessage:
-		//log.Println("StatusMessage", msg.Height, p.ID())
+		//cm.chain.DebugLog("chain.Manager", cm.chain.Provider().Height(), "StatusMessage", msg.Height)
 		cm.Lock()
 		if status, has := cm.statusMap[p.ID()]; has {
 			if status.Height < msg.Height {
@@ -188,11 +188,11 @@ func (cm *Manager) AddData(cd *Data) error {
 		if item := cm.dataQ.FindOrInsert(cd, uint64(cd.Header.Height())); item != nil {
 			old := item.(*Data)
 			if !old.Header.Hash().Equal(cd.Header.Hash()) {
-				cm.Unlock()
 				// TODO : fork detected
 				panic(ErrForkDetected) // TEMP
 			}
 		}
+		cm.tryProcess()
 	}
 	return nil
 }
@@ -214,7 +214,7 @@ func (cm *Manager) Run() {
 	for {
 		select {
 		case <-reqTimer.C:
-			cm.tryRequestData(cm.chain.Provider().Height()+1, DataFetchHeightDiffMax)
+			cm.tryRequestData(DataFetchHeightDiffMax)
 			reqTimer.Reset(100 * time.Millisecond)
 		case <-processTimer.C:
 			cm.tryProcess()
@@ -223,20 +223,15 @@ func (cm *Manager) Run() {
 	}
 }
 
-func (cm *Manager) tryRequestData(From uint32, Count uint32) {
+func (cm *Manager) tryRequestData(Count uint32) {
+	cm.requestLock.Lock()
+	defer cm.requestLock.Unlock()
+
 	if Count > DataFetchHeightDiffMax {
 		Count = DataFetchHeightDiffMax
 	}
 
-	height := cm.Provider().Height()
-	if From <= height {
-		Diff := (height - From)
-		if Diff >= Count {
-			return
-		}
-		Count -= Diff
-		From = height + 1
-	}
+	From := cm.Provider().Height() + 1
 	for TargetHeight := From; TargetHeight < From+Count; TargetHeight++ {
 		if cm.dataQ.Find(uint64(TargetHeight)) == nil {
 			if !cm.requestTimer.Exist(TargetHeight) {
@@ -250,6 +245,7 @@ func (cm *Manager) tryRequestData(From uint32, Count uint32) {
 						sm := &RequestMessage{
 							Height: TargetHeight,
 						}
+						//cm.chain.DebugLog("chain.Manager", cm.chain.Provider().Height(), "Send RequestMessage", sm.Height)
 						if err := p.Send(sm); err != nil {
 							cm.Mesh.Remove(p.NetAddr())
 						} else {
@@ -264,6 +260,9 @@ func (cm *Manager) tryRequestData(From uint32, Count uint32) {
 }
 
 func (cm *Manager) tryProcess() {
+	cm.processLock.Lock()
+	defer cm.processLock.Unlock()
+
 	targetHeight := uint64(cm.Provider().Height() + 1)
 	item := cm.dataQ.PopUntil(targetHeight)
 	for item != nil {
@@ -272,9 +271,11 @@ func (cm *Manager) tryProcess() {
 			return
 		}
 		cm.BroadcastHeader(cd.Header)
+		//cm.chain.DebugLog("chain.Manager", cm.chain.Provider().Height(), "Block Connected", cd.Header.Height())
 		targetHeight++
 		item = cm.dataQ.PopUntil(targetHeight)
 	}
+	cm.tryRequestData(DataFetchHeightDiffMax)
 }
 
 func (cm *Manager) checkFork(fh Header, sigs []common.Signature) error {
@@ -338,6 +339,7 @@ func (cm *Manager) BroadcastHeader(ch Header) {
 		sm := &HeaderMessage{
 			Header: ch,
 		}
+		//cm.chain.DebugLog("chain.Manager", cm.chain.Provider().Height(), "Send HeaderMessage", ch.Height)
 		if err := p.Send(sm); err != nil {
 			cm.Mesh.Remove(p.NetAddr())
 		}
