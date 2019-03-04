@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"git.fleta.io/fleta/framework/peer/peermessage"
+	"github.com/fletaio/framework/peer/peermessage"
 	"github.com/dgraph-io/badger"
 )
 

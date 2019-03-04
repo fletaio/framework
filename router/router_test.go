@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"git.fleta.io/fleta/framework/router/evilnode"
+	"github.com/fletaio/framework/router/evilnode"
 
-	"git.fleta.io/fleta/common"
-	"git.fleta.io/fleta/framework/log"
+	"github.com/fletaio/common"
+	"github.com/fletaio/framework/log"
 )
 
 var _port = 3000

@@ -7,12 +7,12 @@ import (
 	"sync"
 	"time"
 
-	"git.fleta.io/fleta/framework/router/evilnode"
+	"github.com/fletaio/framework/router/evilnode"
 
-	"git.fleta.io/fleta/common"
-	"git.fleta.io/fleta/network"
+	"github.com/fletaio/common"
+	"github.com/fletaio/network"
 
-	"git.fleta.io/fleta/framework/log"
+	"github.com/fletaio/framework/log"
 )
 
 // Config is router config

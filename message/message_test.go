@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	"git.fleta.io/fleta/common/util"
-	"git.fleta.io/fleta/framework/log"
+	"github.com/fletaio/common/util"
+	"github.com/fletaio/framework/log"
 )
 
 func TestDefineType(t *testing.T) {

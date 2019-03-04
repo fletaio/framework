@@ -1,7 +1,7 @@
 package chain
 
 import (
-	"git.fleta.io/fleta/common"
+	"github.com/fletaio/common"
 )
 
 // Chain validates and stores the chain data

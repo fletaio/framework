@@ -5,11 +5,11 @@ import (
 	"sync"
 	"time"
 
-	"git.fleta.io/fleta/common"
-	"git.fleta.io/fleta/common/hash"
-	"git.fleta.io/fleta/common/queue"
-	"git.fleta.io/fleta/framework/chain/mesh"
-	"git.fleta.io/fleta/framework/message"
+	"github.com/fletaio/common"
+	"github.com/fletaio/common/hash"
+	"github.com/fletaio/common/queue"
+	"github.com/fletaio/framework/chain/mesh"
+	"github.com/fletaio/framework/message"
 )
 
 // consts

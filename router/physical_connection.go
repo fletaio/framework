@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"git.fleta.io/fleta/common"
-	"git.fleta.io/fleta/common/util"
-	"git.fleta.io/fleta/framework/log"
+	"github.com/fletaio/common"
+	"github.com/fletaio/common/util"
+	"github.com/fletaio/framework/log"
 )
 
 type routerPhysical interface {

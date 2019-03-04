@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"git.fleta.io/fleta/framework/log"
+	"github.com/fletaio/framework/log"
 	"github.com/dgraph-io/badger"
 )
 

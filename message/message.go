@@ -4,8 +4,8 @@ import (
 	"io"
 	"sync"
 
-	"git.fleta.io/fleta/common/hash"
-	"git.fleta.io/fleta/common/util"
+	"github.com/fletaio/common/hash"
+	"github.com/fletaio/common/util"
 )
 
 // Sender is Default function of messenger

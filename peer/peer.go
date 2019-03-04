@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"git.fleta.io/fleta/common/util"
-	"git.fleta.io/fleta/framework/log"
-	"git.fleta.io/fleta/framework/message"
-	"git.fleta.io/fleta/framework/router"
+	"github.com/fletaio/common/util"
+	"github.com/fletaio/framework/log"
+	"github.com/fletaio/framework/message"
+	"github.com/fletaio/framework/router"
 )
 
 //Peer is manages connections between nodes that cause logical connections.

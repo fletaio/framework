@@ -4,7 +4,7 @@ import (
 	"io"
 	"time"
 
-	"git.fleta.io/fleta/common/util"
+	"github.com/fletaio/common/util"
 )
 
 // ConnectionInfo is struct for manage evel scroe

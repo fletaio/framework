@@ -3,7 +3,7 @@ package mesh
 import (
 	"io"
 
-	"git.fleta.io/fleta/framework/message"
+	"github.com/fletaio/framework/message"
 )
 
 // EventHandler is a event handler of the mesh

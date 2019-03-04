@@ -1,7 +1,7 @@
 package chain
 
 import (
-	"git.fleta.io/fleta/common/hash"
+	"github.com/fletaio/common/hash"
 )
 
 // Provider is a interface to give a chain data

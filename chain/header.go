@@ -3,8 +3,8 @@ package chain
 import (
 	"io"
 
-	"git.fleta.io/fleta/common/hash"
-	"git.fleta.io/fleta/common/util"
+	"github.com/fletaio/common/hash"
+	"github.com/fletaio/common/util"
 )
 
 // Header includes validation informations

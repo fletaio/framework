@@ -12,15 +12,15 @@ import (
 	"testing"
 	"time"
 
-	"git.fleta.io/fleta/common/util"
-	"git.fleta.io/fleta/network/simulations"
+	"github.com/fletaio/common/util"
+	"github.com/fletaio/network/simulations"
 
-	"git.fleta.io/fleta/common"
-	"git.fleta.io/fleta/framework/chain/mesh"
-	"git.fleta.io/fleta/framework/log"
-	"git.fleta.io/fleta/framework/message"
-	"git.fleta.io/fleta/framework/router"
-	"git.fleta.io/fleta/framework/router/evilnode"
+	"github.com/fletaio/common"
+	"github.com/fletaio/framework/chain/mesh"
+	"github.com/fletaio/framework/log"
+	"github.com/fletaio/framework/message"
+	"github.com/fletaio/framework/router"
+	"github.com/fletaio/framework/router/evilnode"
 )
 
 var (

@@ -3,8 +3,8 @@ package chain
 import (
 	"io"
 
-	"git.fleta.io/fleta/common"
-	"git.fleta.io/fleta/common/util"
+	"github.com/fletaio/common"
+	"github.com/fletaio/common/util"
 )
 
 // Data is a unit of the chain

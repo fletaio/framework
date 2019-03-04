@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"git.fleta.io/fleta/framework/log"
+	"github.com/fletaio/framework/log"
 
-	"git.fleta.io/fleta/common"
+	"github.com/fletaio/common"
 )
 
 //ListenerMap is a structure for router waiting to listening.

@@ -9,12 +9,12 @@ import (
 	"sync"
 	"time"
 
-	"git.fleta.io/fleta/common"
-	"git.fleta.io/fleta/core/block"
-	"git.fleta.io/fleta/core/data"
-	"git.fleta.io/fleta/core/kernel"
-	"git.fleta.io/fleta/core/message_def"
-	"git.fleta.io/fleta/core/transaction"
+	"github.com/fletaio/common"
+	"github.com/fletaio/core/block"
+	"github.com/fletaio/core/data"
+	"github.com/fletaio/core/kernel"
+	"github.com/fletaio/core/message_def"
+	"github.com/fletaio/core/transaction"
 
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo"

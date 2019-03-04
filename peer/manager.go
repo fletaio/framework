@@ -11,14 +11,14 @@ import (
 	"sync"
 	"time"
 
-	"git.fleta.io/fleta/framework/chain/mesh"
+	"github.com/fletaio/framework/chain/mesh"
 
-	"git.fleta.io/fleta/common"
-	"git.fleta.io/fleta/framework/log"
-	"git.fleta.io/fleta/framework/message"
-	"git.fleta.io/fleta/framework/peer/peermessage"
-	"git.fleta.io/fleta/framework/peer/storage"
-	"git.fleta.io/fleta/framework/router"
+	"github.com/fletaio/common"
+	"github.com/fletaio/framework/log"
+	"github.com/fletaio/framework/message"
+	"github.com/fletaio/framework/peer/peermessage"
+	"github.com/fletaio/framework/peer/storage"
+	"github.com/fletaio/framework/router"
 )
 
 //Config is structure storing settings information

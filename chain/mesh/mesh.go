@@ -1,7 +1,7 @@
 package mesh
 
 import (
-	"git.fleta.io/fleta/framework/message"
+	"github.com/fletaio/framework/message"
 )
 
 // Mesh manages peer network
