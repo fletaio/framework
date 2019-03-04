@@ -170,6 +170,15 @@ func (cm *Manager) OnRecv(p mesh.Peer, r io.Reader, t message.Type) error {
 	}
 }
 
+// IsExistData returns the chain data is exist or not in the data queue or the chain
+func (cm *Manager) IsExistData(Height uint32) bool {
+	if Height <= cm.Provider().Height() {
+		return true
+	} else {
+		return cm.dataQ.Find(uint64(Height)) != nil
+	}
+}
+
 // AddData pushes a chain data to the chain queue
 func (cm *Manager) AddData(cd *Data) error {
 	if cd.Header.Height() <= cm.Provider().Height() {
@@ -233,8 +242,8 @@ func (cm *Manager) tryRequestData(Count uint32) {
 
 	From := cm.Provider().Height() + 1
 	for TargetHeight := From; TargetHeight < From+Count; TargetHeight++ {
-		if cm.dataQ.Find(uint64(TargetHeight)) == nil {
-			if !cm.requestTimer.Exist(TargetHeight) {
+		if !cm.requestTimer.Exist(TargetHeight) {
+			if cm.dataQ.Find(uint64(TargetHeight)) == nil {
 				list := cm.Mesh.Peers()
 				for _, p := range list {
 					cm.Lock()
