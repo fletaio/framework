@@ -48,9 +48,11 @@ func NewTemplate(TemplateConfig *TemplateConfig) *Template {
 
 // AddController is add page controller
 func (p *Template) AddController(prefix string, con interface{}) {
-	p.controller[prefix] = con
-	if prefix == "/" {
+	if prefix == "/" || prefix == "" {
 		p.controller[""] = con
+		p.controller["/"] = con
+	} else {
+		p.controller[prefix] = con
 	}
 }
 
@@ -62,11 +64,11 @@ func (p *Template) SetTile(urlPath string, tileSet string) {
 // Route is the role of distributing pages according to url
 func (p *Template) Route(r *http.Request, urlpath string) (data []byte, err error) {
 	purePath := regexp.MustCompile("[?#:;]").Split(urlpath, -1)[0]
-	if purePath == "" {
-		purePath = p.Config.WelcomeFile
-	}
-
 	paths := strings.Split(purePath, "/")
+	if paths[len(paths)-1] == "" {
+		paths[len(paths)-1] = p.Config.WelcomeFile
+		purePath = strings.Join(paths, "/")
+	}
 
 	tileSet := "default"
 

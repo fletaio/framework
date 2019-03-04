@@ -30,16 +30,16 @@ func (c *addr) String() string {
 }
 
 type logicalConnection struct {
-	ChainCoord *common.Coordinate
-	recvChan   <-chan []byte
-	sendChan   chan<- []byte
-	PConn      physicalWriter
-	ping       time.Duration
-	readBuf    bytes.Buffer
-	isClosed   bool
-	close      chan<- bool
-	c          *dataCase
-	closeLock  sync.Mutex
+	ChainCoord   *common.Coordinate
+	recvChan     <-chan []byte
+	sendChan     chan<- []byte
+	PConn        physicalWriter
+	ping         time.Duration
+	readBuf      bytes.Buffer
+	isClosed     bool
+	close        chan<- bool
+	c            *dataCase
+	sendChanLock sync.Mutex
 }
 
 func newLConn(sendPConn physicalWriter, ChainCoord *common.Coordinate, ping time.Duration, close chan<- bool) *logicalConnection {
@@ -130,17 +130,19 @@ func (l *logicalConnection) RemoteAddr() net.Addr {
 
 //Write is write byte to buffer
 func (l *logicalConnection) sendToLogical(data []byte) error {
+	l.sendChanLock.Lock()
 	if l.isClosed == true {
 		return io.EOF
 	}
 	l.sendChan <- data
+	l.sendChanLock.Unlock()
 	return nil
 }
 
 //Close is closes data communication channel
 func (l *logicalConnection) Close() error {
-	l.closeLock.Lock()
-	defer l.closeLock.Unlock()
+	l.sendChanLock.Lock()
+	defer l.sendChanLock.Unlock()
 	if l.isClosed != true {
 		l.isClosed = true
 		l.close <- true
