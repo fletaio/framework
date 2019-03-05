@@ -16,7 +16,7 @@ var (
 
 //peer const list
 const (
-	groupLength int = 3
+	groupLength int = 9
 
 	distance1 time.Duration = time.Millisecond * 50
 	distance2 time.Duration = time.Millisecond * 250
