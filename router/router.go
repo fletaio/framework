@@ -190,7 +190,9 @@ func (r *router) incommingConn(conn net.Conn, ChainCoord *common.Coordinate) (*p
 	oldPConn, has := r.PConn.load(addr)
 	var pc *physicalConnection
 	if has {
+		r.PConn.unlock()
 		oldPConn.Close()
+		r.PConn.lock("listening2")
 		// log.Debug("router duplicate conn close ", r.Localhost, " ", conn.RemoteAddr().String())
 	}
 	pc = newPhysicalConnection(addr, conn, r)

@@ -37,12 +37,12 @@ type logicalConnection struct {
 	ping         time.Duration
 	readBuf      bytes.Buffer
 	isClosed     bool
-	close        chan<- bool
+	close        func(ChainCoord *common.Coordinate)
 	c            *dataCase
 	sendChanLock sync.Mutex
 }
 
-func newLConn(sendPConn physicalWriter, ChainCoord *common.Coordinate, ping time.Duration, close chan<- bool) *logicalConnection {
+func newLConn(sendPConn physicalWriter, ChainCoord *common.Coordinate, ping time.Duration, close func(ChainCoord *common.Coordinate)) *logicalConnection {
 	dataChan := make(chan []byte, 2048)
 
 	return &logicalConnection{
@@ -141,7 +141,7 @@ func (l *logicalConnection) sendToLogical(data []byte) error {
 func (l *logicalConnection) Close() error {
 	if l.isClosed != true {
 		l.isClosed = true
-		l.close <- true
+		l.close(l.ChainCoord)
 	}
 	return nil
 }

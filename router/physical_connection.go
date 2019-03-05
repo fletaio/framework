@@ -257,7 +257,7 @@ func (pc *physicalConnection) readBytes(n uint32) (read []byte, returnErr error)
 }
 
 func (pc *physicalConnection) sendToLogicalConn(bs []byte, ChainCoord *common.Coordinate) (err error) {
-	pc.lConn.lock()
+	pc.lConn.lock("sendToLogicalConn")
 	defer pc.lConn.unlock()
 
 	if lConn, has := pc.lConn.load(*ChainCoord); has {
@@ -269,30 +269,46 @@ func (pc *physicalConnection) sendToLogicalConn(bs []byte, ChainCoord *common.Co
 }
 
 func (pc *physicalConnection) makeLogicalConnenction(ChainCoord *common.Coordinate, ping time.Duration) (*logicalConnection, bool) {
-	pc.lConn.lock()
+	pc.lConn.lock("makeLogicalConnenction")
 	defer pc.lConn.unlock()
 
 	l, has := pc.lConn.load(*ChainCoord)
 	if !has {
-		closeChan := make(chan bool)
-		l = newLConn(pc, ChainCoord, ping, closeChan)
+		// closeChan := make(chan bool)
+		l = newLConn(pc, ChainCoord, ping, pc.closeLConn)
 		pc.lConn.store(*ChainCoord, l)
 
-		go func(closeChan chan bool, ChainCoord *common.Coordinate) {
-			<-closeChan
-			pc.lConn.lock()
-			if lConn, has := pc.lConn.load(*ChainCoord); has {
-				lConn.Remove()
-			}
-			pc.lConn.delete(*ChainCoord)
-			if pc.lConn.len() == 0 {
-				pc.PConn.Close()
-			}
-			pc.lConn.unlock()
-		}(closeChan, ChainCoord)
+		// go func(closeChan chan bool, ChainCoord *common.Coordinate) {
+		// 	<-closeChan
+		// 	go func(closeChan chan bool, ChainCoord *common.Coordinate) {
+		// 		pc.lConn.lock("closeChan")
+		// 		if lConn, has := pc.lConn.load(*ChainCoord); has {
+		// 			lConn.Remove()
+		// 		}
+		// 		pc.lConn.delete(*ChainCoord)
+		// 		if pc.lConn.len() == 0 {
+		// 			pc.PConn.Close()
+		// 		}
+		// 		pc.lConn.unlock()
+		// 	}(closeChan, ChainCoord)
+		// }(closeChan, ChainCoord)
 	}
 	new := !has
 	return l, new
+}
+
+func (pc *physicalConnection) closeLConn(ChainCoord *common.Coordinate) {
+	go func(ChainCoord *common.Coordinate) {
+		pc.lConn.lock("closeLConn")
+		if lConn, has := pc.lConn.load(*ChainCoord); has {
+			lConn.Remove()
+		}
+		pc.lConn.delete(*ChainCoord)
+		if pc.lConn.len() == 0 {
+			pc.PConn.Close()
+		}
+		pc.lConn.unlock()
+	}(ChainCoord)
 }
 
 func (pc *physicalConnection) RemoteAddr() net.Addr {
@@ -305,7 +321,7 @@ func (pc *physicalConnection) LocalAddr() net.Addr {
 //Close is used to sever all physical connections and logical connections related to physical connections
 func (pc *physicalConnection) Close() (err error) {
 	pc.isClose = true
-	pc.lConn.lock()
+	pc.lConn.lock("Close")
 	pc.lConn.Range(func(c common.Coordinate, lc *logicalConnection) bool {
 		lc.Close()
 		return true

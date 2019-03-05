@@ -157,15 +157,25 @@ func (n *PConnMap) delete(key string) {
 
 //LConnMap is a structure that manages logical connections.
 type LConnMap struct {
-	l sync.Mutex
-	m map[common.Coordinate]*logicalConnection
+	l    sync.Mutex
+	name string
+	m    map[common.Coordinate]*logicalConnection
 }
 
-func (n *LConnMap) lock() {
-	n.l.Lock()
+func (n *LConnMap) lock(name string) {
+	if n.name != "" {
+		nm := n.name
+		log.Debug("LConnMap lock by ", nm, " and wait ", name)
+		n.l.Lock()
+		log.Debug("LConnMap unlock by ", nm, " enter ", name)
+	} else {
+		n.l.Lock()
+	}
+	n.name = name
 }
 
 func (n *LConnMap) unlock() {
+	n.name = ""
 	n.l.Unlock()
 }
 
