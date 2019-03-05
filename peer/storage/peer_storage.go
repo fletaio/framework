@@ -5,8 +5,6 @@ import (
 	"sort"
 	"strconv"
 	"time"
-
-	"github.com/fletaio/framework/log"
 )
 
 // storage errors
@@ -217,7 +215,7 @@ func (ps *peerStorage) insertSort(p *peerInfomation) bool {
 	} else if p.group > group2 && ps.insert(p, group2) {
 	} else if p.group > group1 && ps.insert(p, group1) {
 	} else {
-		log.Debug("close peer ", p.p.ID())
+		// log.Debug("close peer ", p.p.ID())
 		ps.kickOut(p.p)
 		// p.p.Close()
 		return false
@@ -244,7 +242,7 @@ func (ps *peerStorage) insert(p *peerInfomation, pt peerGroupType) bool {
 				delete(ps.peerMap, deleteEl.p.ID())
 				ps.insertSort(deleteEl)
 			}
-			log.Debug("peer insert ", ":", p.p.ID())
+			// log.Debug("peer insert ", ":", p.p.ID())
 			return true
 		}
 	}

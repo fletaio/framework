@@ -1,5 +1,6 @@
 package log
 
+/*
 import (
 	"flag"
 	"log"
@@ -50,3 +51,4 @@ func Msg(msg ...interface{}) {
 func Msgf(f string, msg ...interface{}) {
 	logger.Printf(string([]byte(time.Now().Format(format) + zerofill)[:27])+" "+f, msg...)
 }
+*/

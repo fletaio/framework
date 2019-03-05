@@ -91,7 +91,7 @@ func (pc *physicalConnection) run() error {
 				log.Error("physicalConnection end ", err)
 			}
 			pc.Close()
-			log.Debug("physicalConnection run end ", pc.PConn.LocalAddr().String(), " ", pc.PConn.RemoteAddr().String())
+			// log.Debug("physicalConnection run end ", pc.PConn.LocalAddr().String(), " ", pc.PConn.RemoteAddr().String())
 			return err
 		}
 		err = pc.sendToLogicalConn(body, ChainCoord)
@@ -281,6 +281,9 @@ func (pc *physicalConnection) makeLogicalConnenction(ChainCoord *common.Coordina
 		go func(closeChan chan bool, ChainCoord *common.Coordinate) {
 			<-closeChan
 			pc.lConn.lock()
+			if lConn, has := pc.lConn.load(*ChainCoord); has {
+				lConn.Remove()
+			}
 			pc.lConn.delete(*ChainCoord)
 			if pc.lConn.len() == 0 {
 				pc.PConn.Close()

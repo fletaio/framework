@@ -225,7 +225,6 @@ func (pm *manager) AddNode(addr string) error {
 	if !pm.router.EvilNodeManager().IsBanNode(addr) {
 		pm.candidates.store(addr, csRequestWait)
 		pm.doManageCandidate(addr, csRequestWait)
-		log.Debug("AddNode ", pm.router.Localhost(), addr)
 	} else {
 		pm.errLog("AddNode router.ErrCanNotConnectToEvilNode", addr)
 		return router.ErrCanNotConnectToEvilNode
@@ -402,7 +401,6 @@ func (pm *manager) doManageCandidate(addr string, cs candidateState) error {
 	case csRequestWait:
 		// go func(addr string) {
 		err = pm.router.Request(addr, pm.ChainCoord)
-		log.Debug(pm.router.Conf().Network, addr)
 		if err != nil {
 			pm.errLog("RequestWait err ", err)
 		}

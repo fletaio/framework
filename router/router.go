@@ -79,7 +79,7 @@ func (r *router) AddListen(ChainCoord *common.Coordinate) error {
 			}
 		}
 
-		log.Debug("Listen ", listenAddr, " ", l.Addr().String())
+		// log.Debug("Listen ", listenAddr, " ", l.Addr().String())
 
 		go r.listening(l)
 	}
@@ -156,9 +156,8 @@ func (r *router) listening(l net.Listener) {
 			}
 			_, err = r.incommingConn(conn, nil)
 			if err != nil {
-				if err == ErrCanNotConnectToEvilNode {
-					conn.Close()
-				} else {
+				conn.Close()
+				if err != ErrCanNotConnectToEvilNode {
 					log.Error("incommingConn err", err)
 				}
 			}
@@ -192,7 +191,7 @@ func (r *router) incommingConn(conn net.Conn, ChainCoord *common.Coordinate) (*p
 	var pc *physicalConnection
 	if has {
 		oldPConn.Close()
-		log.Debug("router duplicate conn close ", r.Localhost, " ", conn.RemoteAddr().String())
+		// log.Debug("router duplicate conn close ", r.Localhost, " ", conn.RemoteAddr().String())
 	}
 	pc = newPhysicalConnection(addr, conn, r)
 	r.PConn.store(addr, pc)

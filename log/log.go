@@ -13,14 +13,16 @@ const (
 
 // Debug logs a debug entry
 func Debug(v ...interface{}) {
-	// plog.Debug(v...)
-	Msg(v...)
+	// Msg(v...)
+	v = append([]interface{}{"DEBUG "}, v...)
+	log.Println(v)
 }
 
 // Debugf logs a debug entry with formatting
 func Debugf(s string, v ...interface{}) {
-	// plog.Debugf(s, v...)
-	Msgf(s, v...)
+	// Msgf(s, v...)
+	s = "DEBUG " + s
+	log.Printf(s, v)
 }
 
 // Info logs a normal. information, entry
@@ -74,13 +76,13 @@ func Warnf(s string, v ...interface{}) {
 // Error logs an error log entry
 func Error(v ...interface{}) {
 	v = append([]interface{}{"ERROR "}, v...)
-	Msg(v...)
-	// log.Println(v)
+	// Msg(v...)
+	log.Println(v)
 }
 
 // Errorf logs an error log entry with formatting
 func Errorf(s string, v ...interface{}) {
 	s = "ERROR " + s
-	Msgf(s, v...)
-	// log.Printf(s, v)
+	// Msgf(s, v...)
+	log.Printf(s, v)
 }
