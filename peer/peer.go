@@ -102,6 +102,7 @@ func (p *peer) readPacket() {
 		err = p.onRecvEventHandler(p, message.Type(t))
 		if err != nil {
 			log.Error("onRecv error : ", err)
+			return
 		}
 	}
 }
