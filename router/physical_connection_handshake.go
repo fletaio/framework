@@ -12,7 +12,6 @@ import (
 
 	"github.com/fletaio/common"
 	"github.com/fletaio/common/util"
-	"github.com/fletaio/framework/log"
 	"github.com/fletaio/framework/message"
 )
 
@@ -122,9 +121,9 @@ func (pc *physicalConnection) handshakeSend(ChainCoord *common.Coordinate) {
 func (pc *physicalConnection) handshakeRecv() (*common.Coordinate, error) {
 	body, ChainCoord, err := pc.readConn()
 	if err != nil {
-		if err != io.EOF && err != io.ErrClosedPipe {
-			log.Error("physicalConnection end ", err)
-		}
+		// if err != io.EOF && err != io.ErrClosedPipe {
+		// 	log.Error("physicalConnection end ", err)
+		// }
 		pc.Close()
 		return nil, err
 	}
@@ -153,7 +152,7 @@ func (pc *physicalConnection) handshakeRecv() (*common.Coordinate, error) {
 	if conn, new := pc.makeLogicalConnenction(ChainCoord, pc.pingTime); new == true {
 		err := pc.r.acceptConn(conn, ChainCoord)
 		if err != nil {
-			log.Error("physicalConnection run acceptConn err : ", err)
+			// log.Error("physicalConnection run acceptConn err : ", err)
 		}
 	}
 

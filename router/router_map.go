@@ -6,8 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fletaio/framework/log"
-
 	"github.com/fletaio/common"
 )
 
@@ -115,10 +113,10 @@ type PConnMap struct {
 
 func (n *PConnMap) lock(name string) {
 	if n.name != "" {
-		nm := n.name
-		log.Debug("PConnMap lock by ", nm, " and wait ", name)
+		// nm := n.name
+		// log.Debug("PConnMap lock by ", nm, " and wait ", name)
 		n.l.Lock()
-		log.Debug("PConnMap unlock by ", nm, " enter ", name)
+		// log.Debug("PConnMap unlock by ", nm, " enter ", name)
 	} else {
 		n.l.Lock()
 	}
@@ -164,10 +162,10 @@ type LConnMap struct {
 
 func (n *LConnMap) lock(name string) {
 	if n.name != "" {
-		nm := n.name
-		log.Debug("LConnMap lock by ", nm, " and wait ", name)
+		// nm := n.name
+		// log.Debug("LConnMap lock by ", nm, " and wait ", name)
 		n.l.Lock()
-		log.Debug("LConnMap unlock by ", nm, " enter ", name)
+		// log.Debug("LConnMap unlock by ", nm, " enter ", name)
 	} else {
 		n.l.Lock()
 	}

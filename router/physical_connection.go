@@ -4,14 +4,12 @@ import (
 	"bytes"
 	"compress/gzip"
 	"hash/crc32"
-	"io"
 	"net"
 	"sync"
 	"time"
 
 	"github.com/fletaio/common"
 	"github.com/fletaio/common/util"
-	"github.com/fletaio/framework/log"
 )
 
 type routerPhysical interface {
@@ -87,9 +85,9 @@ func (pc *physicalConnection) run() error {
 	for {
 		body, ChainCoord, err := pc.readConn()
 		if err != nil {
-			if err != io.EOF && err != io.ErrClosedPipe {
-				log.Error("physicalConnection end ", err)
-			}
+			// if err != io.EOF && err != io.ErrClosedPipe {
+			// 	log.Error("physicalConnection end ", err)
+			// }
 			pc.Close()
 			// log.Debug("physicalConnection run end ", pc.PConn.LocalAddr().String(), " ", pc.PConn.RemoteAddr().String())
 			return err
