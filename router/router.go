@@ -1,6 +1,7 @@
 package router
 
 import (
+	"io"
 	"net"
 	"strconv"
 	"strings"
@@ -38,7 +39,7 @@ type router struct {
 	localhost       string
 	ListenersLock   sync.Mutex
 	Listeners       ListenerMap
-	PConn           PConnMap
+	PConn           *PConnMap
 	evilNodeManager *evilnode.Manager
 	ReceiverChan    ReceiverChanMap
 }
@@ -48,7 +49,7 @@ func NewRouter(Config *Config) (Router, error) {
 	return &router{
 		Config:          Config,
 		Listeners:       ListenerMap{},
-		PConn:           PConnMap{},
+		PConn:           &PConnMap{},
 		evilNodeManager: evilnode.NewManager(&Config.EvilNodeConfig),
 		ReceiverChan:    ReceiverChanMap{},
 	}, nil
@@ -98,11 +99,15 @@ func (r *router) Request(addr string, ChainCoord *common.Coordinate) error {
 	}
 
 	r.PConn.lock("Request")
+	defer r.PConn.unlock()
 	_, has := r.PConn.load(addr)
-	r.PConn.unlock()
+
 	if !has {
 		conn, err := network.DialTimeout(r.Config.Network, addr, time.Second*2)
 		if err != nil {
+			if conn != nil {
+				conn.Close()
+			}
 			return err
 		}
 
@@ -151,13 +156,18 @@ func (r *router) listening(l net.Listener) {
 		if has && ls.State() == listening {
 			conn, err := l.Accept()
 			if err != nil {
+				if conn != nil {
+					conn.Close()
+				}
 				log.Error("router run err : ", err)
 				continue
 			}
+			r.PConn.lock("Accept")
 			_, err = r.incommingConn(conn, nil)
+			r.PConn.unlock()
 			if err != nil {
 				conn.Close()
-				if err != ErrCanNotConnectToEvilNode {
+				if err != ErrCanNotConnectToEvilNode && err != io.EOF {
 					log.Error("incommingConn err", err)
 				}
 			}
@@ -186,41 +196,30 @@ func (r *router) incommingConn(conn net.Conn, ChainCoord *common.Coordinate) (*p
 		return nil, ErrCanNotConnectToEvilNode
 	}
 
-	r.PConn.lock("listening")
 	oldPConn, has := r.PConn.load(addr)
 	var pc *physicalConnection
 	if has {
-		r.PConn.unlock()
 		oldPConn.Close()
-		r.PConn.lock("listening2")
 		// log.Debug("router duplicate conn close ", r.Localhost, " ", conn.RemoteAddr().String())
 	}
+
 	pc = newPhysicalConnection(addr, conn, r)
 	r.PConn.store(addr, pc)
-	r.PConn.unlock()
 
 	errCh := make(chan error)
-	var wg sync.WaitGroup
-	wg.Add(1)
 	go func(pc *physicalConnection) {
-		wg.Done()
-
 		if ChainCoord != nil {
 			pc.handshakeSend(ChainCoord)
 		}
 		cc, err := pc.handshakeRecv()
-		if err != nil {
-			pc.Close()
-		} else {
-			if ChainCoord == nil {
-				ChainCoord = cc
-				pc.handshakeSend(cc)
-			}
+		if err == nil && ChainCoord == nil {
+			ChainCoord = cc
+			pc.handshakeSend(cc)
 		}
 
 		errCh <- err
 	}(pc)
-	wg.Wait()
+
 	deadTimer := time.NewTimer(5 * time.Second)
 	select {
 	case <-deadTimer.C:
@@ -236,12 +235,15 @@ func (r *router) incommingConn(conn net.Conn, ChainCoord *common.Coordinate) (*p
 	go pc.run()
 	return pc, nil
 }
+
 func (r *router) localAddress() string {
 	return r.Config.Address
 }
+
 func (r *router) port() int {
 	return r.Config.Port
 }
+
 func (r *router) acceptConn(conn *logicalConnection, ChainCoord *common.Coordinate) error {
 	ch := r.ReceiverChan.load(r.Config.Port, *ChainCoord)
 	ch <- conn
@@ -250,9 +252,6 @@ func (r *router) acceptConn(conn *logicalConnection, ChainCoord *common.Coordina
 }
 
 func (r *router) removePhysicalConnenction(pc *physicalConnection) error {
-	r.PConn.lock("removePhysicalConnenction")
-	defer r.PConn.unlock()
-
 	addr := pc.RemoteAddr().String()
 	if raddr, ok := pc.RemoteAddr().(*net.TCPAddr); ok {
 		addr = raddr.IP.String()
@@ -260,7 +259,10 @@ func (r *router) removePhysicalConnenction(pc *physicalConnection) error {
 		addrs := strings.Split(addr, ":")
 		addr = strings.Join(addrs[:len(addrs)-1], ":")
 	}
+	r.PConn.lock("removePhysicalConnenction")
 	r.PConn.delete(addr)
+	r.PConn.unlock()
+
 	return pc.Close()
 }
 

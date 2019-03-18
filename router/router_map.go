@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/fletaio/common"
+	"github.com/fletaio/framework/log"
 )
 
 //ListenerMap is a structure for router waiting to listening.
@@ -112,11 +113,28 @@ type PConnMap struct {
 }
 
 func (n *PConnMap) lock(name string) {
-	if n.name != "" {
-		// nm := n.name
-		// log.Debug("PConnMap lock by ", nm, " and wait ", name)
+	if nm := n.name; nm != "" {
+		end := make(chan bool)
+		go func(by, new string, end chan bool) {
+			deadTimer := time.NewTimer(10 * time.Second)
+			select {
+			case <-deadTimer.C: //timeout
+				log.Error("PConnMap lock by ", nm, ",", name, "waited 10 seconds to be unlocked.")
+				<-end
+				end <- true
+			case <-end: //end
+				end <- false
+				deadTimer.Stop()
+			}
+
+		}(nm, name, end)
 		n.l.Lock()
-		// log.Debug("PConnMap unlock by ", nm, " enter ", name)
+		end <- true
+		f := <-end
+		close(end)
+		if f == true {
+			log.Error("PConnMap unlock by ", nm, " enter ", name)
+		}
 	} else {
 		n.l.Lock()
 	}
@@ -161,8 +179,7 @@ type LConnMap struct {
 }
 
 func (n *LConnMap) lock(name string) {
-	if n.name != "" {
-		// nm := n.name
+	if nm := n.name; nm != "" {
 		// log.Debug("LConnMap lock by ", nm, " and wait ", name)
 		n.l.Lock()
 		// log.Debug("LConnMap unlock by ", nm, " enter ", name)

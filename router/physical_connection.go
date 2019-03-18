@@ -47,7 +47,7 @@ type physicalConnection struct {
 	handshakeTimeMap *TimerMap
 	isClose          bool
 
-	lConn     LConnMap
+	lConn     *LConnMap
 	r         routerPhysical
 	localhost string
 
@@ -67,7 +67,7 @@ func newPhysicalConnection(addr string, conn net.Conn, r routerPhysical) *physic
 	return &physicalConnection{
 		PConn:            conn,
 		isClose:          false,
-		lConn:            LConnMap{},
+		lConn:            &LConnMap{},
 		handshakeTimeMap: NewTimerMap(time.Second*10, 3),
 		r:                r,
 	}
@@ -85,15 +85,12 @@ func (pc *physicalConnection) run() error {
 	for {
 		body, ChainCoord, err := pc.readConn()
 		if err != nil {
-			// if err != io.EOF && err != io.ErrClosedPipe {
-			// 	log.Error("physicalConnection end ", err)
-			// }
 			pc.Close()
-			// log.Debug("physicalConnection run end ", pc.PConn.LocalAddr().String(), " ", pc.PConn.RemoteAddr().String())
 			return err
 		}
 		err = pc.sendToLogicalConn(body, ChainCoord)
 		if err != nil {
+			pc.Close()
 			return err
 		}
 	}
@@ -272,24 +269,8 @@ func (pc *physicalConnection) makeLogicalConnenction(ChainCoord *common.Coordina
 
 	l, has := pc.lConn.load(*ChainCoord)
 	if !has {
-		// closeChan := make(chan bool)
 		l = newLConn(pc, ChainCoord, ping, pc.closeLConn)
 		pc.lConn.store(*ChainCoord, l)
-
-		// go func(closeChan chan bool, ChainCoord *common.Coordinate) {
-		// 	<-closeChan
-		// 	go func(closeChan chan bool, ChainCoord *common.Coordinate) {
-		// 		pc.lConn.lock("closeChan")
-		// 		if lConn, has := pc.lConn.load(*ChainCoord); has {
-		// 			lConn.Remove()
-		// 		}
-		// 		pc.lConn.delete(*ChainCoord)
-		// 		if pc.lConn.len() == 0 {
-		// 			pc.PConn.Close()
-		// 		}
-		// 		pc.lConn.unlock()
-		// 	}(closeChan, ChainCoord)
-		// }(closeChan, ChainCoord)
 	}
 	new := !has
 	return l, new
