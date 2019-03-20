@@ -163,7 +163,7 @@ func (r *router) ConnList() []string {
 	s := []string{}
 	r.ConnMapLock.RLock()
 	for k, _ := range r.ConnMap {
-		k = "r" + strings.ReplaceAll(k, "testid", "")
+		k = "r" + strings.Replace(k, "testid", "", 0)
 		s = append(s, k)
 	}
 	r.ConnMapLock.RUnlock()
