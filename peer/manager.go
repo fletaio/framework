@@ -307,7 +307,7 @@ func (pm *manager) NodeList() []string {
 func (pm *manager) ConnectedList() []string {
 	list := make([]string, 0, pm.connections.Len())
 	pm.connections.Range(func(addr string, p Peer) bool {
-		addr = "c" + strings.ReplaceAll(addr, "testid", "")
+		addr = "c" + strings.Replace(addr, "testid", "", 0)
 		list = append(list, addr)
 		return true
 	})
