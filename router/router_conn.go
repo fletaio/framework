@@ -1,6 +1,8 @@
 package router
 
-import "net"
+import (
+	"net"
+)
 
 // Conn is a generic stream-oriented network connection.
 //
@@ -8,6 +10,7 @@ import "net"
 type Conn interface {
 	net.Conn
 	ID() string
-	Reset()
-	PrintData() string
+	SendHeartBit()
+	// Reset()
+	// PrintData() string
 }

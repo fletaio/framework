@@ -22,6 +22,7 @@ var (
 
 type handshake struct {
 	RemoteAddr string
+	ChainCoord *common.Coordinate
 	Address    string
 	Port       uint16
 	Time       uint64
@@ -37,6 +38,11 @@ func (h *handshake) WriteTo(w io.Writer) (int64, error) {
 	}
 
 	if n, err := util.WriteString(w, h.RemoteAddr); err != nil {
+		return wrote, err
+	} else {
+		wrote += n
+	}
+	if n, err := h.ChainCoord.WriteTo(w); err != nil {
 		return wrote, err
 	} else {
 		wrote += n
@@ -77,6 +83,13 @@ func (h *handshake) ReadFrom(r io.Reader) (int64, error) {
 		read += n
 		h.RemoteAddr = v
 	}
+
+	h.ChainCoord = &common.Coordinate{}
+	if n, err := h.ChainCoord.ReadFrom(r); err != nil {
+		return read, err
+	} else {
+		read += n
+	}
 	if v, n, err := util.ReadString(r); err != nil {
 		return read, err
 	} else {
@@ -105,9 +118,10 @@ func (h *handshake) hash() hash.Hash256 {
 	return hash.Hash(bf.Bytes())
 }
 
-func (pc *physicalConnection) handshakeSend(ChainCoord *common.Coordinate) {
+func (pc *RouterConn) handshakeSend(ChainCoord *common.Coordinate) {
 	h := &handshake{
 		RemoteAddr: pc.RemoteAddr().String(),
+		ChainCoord: pc.r.chainCoord(),
 		Address:    pc.r.localAddress(),
 		Port:       uint16(pc.r.port()),
 		Time:       uint64(time.Now().UnixNano()),
@@ -115,15 +129,12 @@ func (pc *physicalConnection) handshakeSend(ChainCoord *common.Coordinate) {
 	bf := &bytes.Buffer{}
 	h.WriteTo(bf)
 
-	pc.write(bf.Bytes(), ChainCoord, UNCOMPRESSED)
+	pc.write(bf.Bytes(), UNCOMPRESSED)
 }
 
-func (pc *physicalConnection) handshakeRecv() (*common.Coordinate, error) {
-	body, ChainCoord, err := pc.readConn()
+func (pc *RouterConn) handshakeRecv() (*common.Coordinate, error) {
+	body, err := pc.ReadConn()
 	if err != nil {
-		// if err != io.EOF && err != io.ErrClosedPipe {
-		// 	log.Error("physicalConnection end ", err)
-		// }
 		pc.Close()
 		return nil, err
 	}
@@ -149,12 +160,10 @@ func (pc *physicalConnection) handshakeRecv() (*common.Coordinate, error) {
 		pc.Address = fmt.Sprintf("%v:%v", h.Address, h.Port)
 	}
 	pc.pingTime = time.Now().Sub(time.Unix(0, int64(h.Time)))
-	if conn, new := pc.makeLogicalConnenction(ChainCoord, pc.pingTime); new == true {
-		err := pc.r.acceptConn(conn, ChainCoord)
-		if err != nil {
-			// log.Error("physicalConnection run acceptConn err : ", err)
-		}
+	err = pc.r.acceptConn(pc)
+	if err != nil {
+		return nil, err
 	}
 
-	return ChainCoord, nil
+	return h.ChainCoord, nil
 }

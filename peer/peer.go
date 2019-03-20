@@ -2,8 +2,6 @@ package peer
 
 import (
 	"bytes"
-	"io"
-	"net"
 	"sync"
 	"time"
 
@@ -15,13 +13,13 @@ import (
 
 //Peer is manages connections between nodes that cause logical connections.
 type Peer interface {
-	net.Conn
+	router.Conn
 	Send(m message.Message) error
 	PingTime() time.Duration
 	SetPingTime(t time.Duration)
 	ConnectedTime() int64
 	IsClose() bool
-	ID() string
+	Remove()
 	NetAddr() string
 }
 
@@ -86,13 +84,14 @@ func (p *peer) readPacket() {
 	for !p.closed {
 		t, n, err := util.ReadUint64(p)
 		if n != 0 && message.NameOfType(message.Type(t)) == "" {
-			p.Reset()
-			continue
+			log.Error("not defind message type recived", t)
+			p.Close()
+			return
 		}
 		if err != nil {
-			if err != io.EOF {
-				log.Error("recv read type error : ", err)
-			}
+			// if err != io.EOF {
+			// 	log.Error("recv read type error : ", err)
+			// }
 			return
 		}
 		if n != 8 {
@@ -147,6 +146,11 @@ func (p *peer) SetRegisteredTime(t int64) {
 //IsClose returns closed
 func (p *peer) IsClose() bool {
 	return p.closed
+}
+
+//Remove is Close connection when removed peer
+func (p *peer) Remove() {
+	p.Conn.Close()
 }
 
 //Close is used to break logical connections and delete stored peer data.

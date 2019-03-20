@@ -21,6 +21,8 @@ import (
 	"github.com/fletaio/framework/message"
 	"github.com/fletaio/framework/router"
 	"github.com/fletaio/framework/router/evilnode"
+
+	_ "net/http/pprof"
 )
 
 var (
@@ -154,14 +156,13 @@ func upVisulaization(tms []*testMessage) {
 					return func() []string { return []string{tm.ID} }
 				}(tm))
 				simulations.AddVisualizationData(tm.ID, "peer", tm.pm.ConnectedList)
-				simulations.AddVisualizationData(tm.ID, "group", tm.pm.GroupList)
-				simulations.AddVisualizationData(tm.ID, "test", tm.pm.TestList)
+				simulations.AddVisualizationData(tm.ID, "group", tm.pm.router.ConnList)
+				// simulations.AddVisualizationData(tm.ID, "test", tm.pm.TestList)
 			}
 			time.Sleep(time.Second)
 		}
 	}()
 	go simulations.VisualizationStart(mc, 8080)
-
 }
 
 func Test_manager_BroadCast(t *testing.T) {
@@ -228,7 +229,7 @@ func Test_manager_BroadCast(t *testing.T) {
 				pc := &Config{
 					StorePath: tt.args.DefaultConfig.StorePath + strconv.Itoa(id) + "/",
 				}
-				r, _ := router.NewRouter(rc)
+				r, _ := router.NewRouter(rc, tt.args.ChainCoord)
 				pm, _ := NewManager(tt.args.ChainCoord, r, pc)
 				mm := message.NewManager()
 
@@ -386,7 +387,7 @@ func Test_manager_ExceptCast(t *testing.T) {
 				pc := &Config{
 					StorePath: tt.args.DefaultConfig.StorePath + strconv.Itoa(id) + "/",
 				}
-				r, _ := router.NewRouter(rc)
+				r, _ := router.NewRouter(rc, tt.args.ChainCoord)
 				pm, _ := NewManager(tt.args.ChainCoord, r, pc)
 				mm := message.NewManager()
 
@@ -533,7 +534,7 @@ func Test_target_cast(t *testing.T) {
 				pc := &Config{
 					StorePath: tt.args.DefaultConfig.StorePath + strconv.Itoa(id) + "/",
 				}
-				r, _ := router.NewRouter(rc)
+				r, _ := router.NewRouter(rc, tt.args.ChainCoord)
 				pm, _ := NewManager(tt.args.ChainCoord, r, pc)
 				mm := message.NewManager()
 
@@ -647,7 +648,7 @@ func TestNewManager(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r, _ := router.NewRouter(tt.args.routerConfig)
+			r, _ := router.NewRouter(tt.args.routerConfig, tt.args.ChainCoord)
 			_, err := NewManager(tt.args.ChainCoord, r, tt.args.Config)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewManager() error = %v, wantErr %v", err, tt.wantErr)
@@ -716,10 +717,10 @@ func TestAddNode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			addr1 = addr1 + ":" + strconv.Itoa(port)
 			addr2 = addr2 + ":" + strconv.Itoa(port)
-			r1, _ := router.NewRouter(tt.args.routerConfig1)
+			r1, _ := router.NewRouter(tt.args.routerConfig1, tt.args.ChainCoord)
 			pm1, _ := NewManager(tt.args.ChainCoord, r1, tt.args.Config1)
 
-			r2, _ := router.NewRouter(tt.args.routerConfig2)
+			r2, _ := router.NewRouter(tt.args.routerConfig2, tt.args.ChainCoord)
 			pm2, _ := NewManager(tt.args.ChainCoord, r2, tt.args.Config2)
 
 			err := pm2.AddNode(addr1)
@@ -792,7 +793,7 @@ func TestBanEvil(t *testing.T) {
 	for _, tt := range tests {
 		tempAddr := "temp:" + strconv.Itoa(port)
 		t.Run(tt.name, func(t *testing.T) {
-			r1, _ := router.NewRouter(tt.args.routerConfig1)
+			r1, _ := router.NewRouter(tt.args.routerConfig1, tt.args.ChainCoord)
 			pm, _ := NewManager(tt.args.ChainCoord, r1, tt.args.Config1)
 			pm.AddNode(tempAddr)
 			pm.StartManage()
@@ -870,7 +871,7 @@ func TestPeerListSpread(t *testing.T) {
 				pc := &Config{
 					StorePath: tt.args.DefaultConfig.StorePath + strconv.Itoa(id) + "/",
 				}
-				r, _ := router.NewRouter(rc)
+				r, _ := router.NewRouter(rc, tt.args.ChainCoord)
 
 				pm, _ := NewManager(tt.args.ChainCoord, r, pc)
 
@@ -971,10 +972,10 @@ func Test_manager_EnforceConnect(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			addr1 = addr1 + ":" + strconv.Itoa(port)
 			addr2 = addr2 + ":" + strconv.Itoa(port)
-			r1, _ := router.NewRouter(tt.args.routerConfig1)
+			r1, _ := router.NewRouter(tt.args.routerConfig1, tt.args.ChainCoord)
 			pm1, _ := NewManager(tt.args.ChainCoord, r1, tt.args.Config1)
 
-			r2, _ := router.NewRouter(tt.args.routerConfig2)
+			r2, _ := router.NewRouter(tt.args.routerConfig2, tt.args.ChainCoord)
 			pm2, _ := NewManager(tt.args.ChainCoord, r2, tt.args.Config2)
 
 			err := pm2.AddNode(addr1)
@@ -1120,7 +1121,7 @@ func Test_multi_chain_send(t *testing.T) {
 				return tm, nil
 			}
 
-			r1, err := router.NewRouter(tt.args.routerConfig1)
+			r1, err := router.NewRouter(tt.args.routerConfig1, tt.args.ChainCoord1)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewManager() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -1137,7 +1138,7 @@ func Test_multi_chain_send(t *testing.T) {
 				return
 			}
 
-			r2, err := router.NewRouter(tt.args.routerConfig2)
+			r2, err := router.NewRouter(tt.args.routerConfig2, tt.args.ChainCoord2)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewManager() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -1279,7 +1280,7 @@ func Test_manager_BroadCastContinuery(t *testing.T) {
 				pc := &Config{
 					StorePath: tt.args.DefaultConfig.StorePath + strconv.Itoa(id) + "/",
 				}
-				r, _ := router.NewRouter(rc)
+				r, _ := router.NewRouter(rc, tt.args.ChainCoord)
 				pm, _ := NewManager(tt.args.ChainCoord, r, pc)
 				mm := message.NewManager()
 
@@ -1309,7 +1310,7 @@ func Test_manager_BroadCastContinuery(t *testing.T) {
 								tm.From = TestMsg + ":" + tm.ID
 								doneChan <- true
 								tm.pm.BroadCast(tm)
-								log.Info(tm.ID, "Done", TestMsg)
+								// log.Info(tm.ID, "Done", TestMsg)
 							}
 							tm.lock.Unlock()
 							return nil

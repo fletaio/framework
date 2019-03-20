@@ -98,9 +98,16 @@ func NewManager(ChainCoord *common.Coordinate, r router.Router, Config *Config) 
 
 	//add requestPeerList message
 	pm.MessageManager.SetCreator(peermessage.PeerListMessageType, peermessage.PeerListCreator)
-	// mm.ApplyMessage(peermessage.PeerListMessageType, peermessage.PeerListCreator, pm.peerListHandler)
 
 	pm.RegisterEventHandler(pm)
+
+	go func() {
+		time.Sleep(10 * time.Second)
+		pm.connections.Range(func(addr string, p Peer) bool {
+			p.SendHeartBit()
+			return true
+		})
+	}()
 
 	return pm, nil
 }
@@ -134,7 +141,7 @@ func (pm *manager) StartManage() {
 	go func() {
 		wg.Done()
 		for {
-			conn, pingTime, err := pm.router.Accept(pm.ChainCoord)
+			conn, pingTime, err := pm.router.Accept()
 			if err != nil {
 				// pm.errLog(err, conn.ID())
 				continue
@@ -174,7 +181,7 @@ func (pm *manager) StartManage() {
 	}()
 	wg.Wait()
 
-	pm.router.AddListen(pm.ChainCoord)
+	pm.router.Listen()
 
 	go pm.manageCandidate()
 	go pm.rotatePeer()
@@ -208,7 +215,7 @@ func (pm *manager) EnforceConnect() {
 		return true
 	})
 	for _, addr := range dialList {
-		err := pm.router.Request(addr, pm.ChainCoord)
+		err := pm.router.Request(addr)
 		if err != nil {
 			// pm.errLog("EnforceConnect error ", err)
 		}
@@ -300,7 +307,8 @@ func (pm *manager) NodeList() []string {
 func (pm *manager) ConnectedList() []string {
 	list := make([]string, 0, pm.connections.Len())
 	pm.connections.Range(func(addr string, p Peer) bool {
-		list = append(list, "co"+addr)
+		addr = "c" + strings.ReplaceAll(addr, "testid", "")
+		list = append(list, addr)
 		return true
 	})
 	return list
@@ -400,10 +408,11 @@ func (pm *manager) doManageCandidate(addr string, cs candidateState) error {
 	switch cs {
 	case csRequestWait:
 		// go func(addr string) {
-		err = pm.router.Request(addr, pm.ChainCoord)
-		if err != nil {
-			// pm.errLog("RequestWait err ", err)
-		}
+		/*err = */
+		pm.router.Request(addr)
+		// if err != nil {
+		// pm.errLog("RequestWait err ", err)
+		// }
 		// }(addr)
 	case csPeerListWait:
 		if p, has := pm.connections.Load(addr); has {
@@ -463,7 +472,7 @@ func (pm *manager) appendPeerStorage() {
 		if connectedPeer, has := pm.connections.Load(p.Address); has {
 			pm.addReadyConn(connectedPeer)
 		} else {
-			err := pm.router.Request(p.Address, pm.ChainCoord)
+			err := pm.router.Request(p.Address)
 			if err != nil {
 				// pm.errLog("PeerListHandler err ", pm.router.Localhost(), err)
 			}
@@ -494,6 +503,10 @@ func (pm *manager) kickOutPeerStorage(ip storage.Peer) {
 }
 
 func (pm *manager) deletePeer(addr string) {
+	p, has := pm.connections.Load(addr)
+	if has == true {
+		p.Remove()
+	}
 	pm.connections.Delete(addr)
 	pm.eventHandlerLock.RLock()
 	if p, has := pm.connections.Load(addr); has {
@@ -540,7 +553,7 @@ func (pm *manager) addReadyConn(p Peer) {
 **/
 // AddNode is used to register additional peers from outside.
 func (pm *manager) Add(netAddr string, doForce bool) {
-	err := pm.router.Request(netAddr, pm.ChainCoord)
+	err := pm.router.Request(netAddr)
 	if err != nil {
 		// pm.errLog("RequestWait err ", err, netAddr)
 	}
