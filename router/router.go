@@ -48,9 +48,12 @@ type router struct {
 	localhost       string
 	evilNodeManager *evilnode.Manager
 	listener        net.Listener
-	AcceptConnChan  chan *RouterConn
-	ConnMap         map[string]*RouterConn
-	ConnMapLock     sync.RWMutex
+
+	incommingLock sync.Mutex
+
+	AcceptConnChan chan *RouterConn
+	ConnMap        map[string]*RouterConn
+	ConnMapLock    sync.RWMutex
 }
 
 // NewRouter is creator of router
@@ -92,6 +95,8 @@ func (r *router) Listen() error {
 //Request requests the connection by entering the address when a logical connection is required.
 //The chain coordinates support the connection between subchains.
 func (r *router) Request(addr string) error {
+	r.incommingLock.Lock()
+	defer r.incommingLock.Unlock()
 	if r.localhost != "" && strings.HasPrefix(addr, r.localhost) {
 		return ErrCannotRequestToLocal
 	}
@@ -142,20 +147,25 @@ func (r *router) setLocalhost(l string) {
 func (r *router) listening() {
 	for {
 		conn, err := r.listener.Accept()
-		if err != nil {
-			if conn != nil {
+		func(conn net.Conn) {
+			r.incommingLock.Lock()
+			defer r.incommingLock.Unlock()
+
+			if err != nil {
+				if conn != nil {
+					conn.Close()
+				}
+				log.Error("router run err : ", err)
+				return
+			}
+			_, err = r.incommingConn(conn, IsAccept)
+			if err != nil {
 				conn.Close()
+				if err != ErrCanNotConnectToEvilNode && err != io.EOF {
+					log.Error("incommingConn err", err)
+				}
 			}
-			log.Error("router run err : ", err)
-			continue
-		}
-		_, err = r.incommingConn(conn, IsAccept)
-		if err != nil {
-			conn.Close()
-			if err != ErrCanNotConnectToEvilNode && err != io.EOF {
-				log.Error("incommingConn err", err)
-			}
-		}
+		}(conn)
 	}
 }
 
