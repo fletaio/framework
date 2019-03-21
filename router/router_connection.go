@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"hash/crc32"
-	"log"
 	"net"
 	"sync"
 	"time"
@@ -79,8 +78,8 @@ func (pc *RouterConn) checkHeartBit() {
 		for {
 			time.Sleep(10 * time.Second)
 			passed := time.Now().Sub(pc.heartBitTime)
-			if passed > 20*time.Second {
-				log.Println("no heartbit while", passed, "/", 30*time.Second, ":", pc.ID(), pc.LocalAddr().String(), pc.RemoteAddr().String())
+			if passed > 25*time.Second {
+				// log.Println("no heartbit while", passed, "/", 30*time.Second, ":", pc.ID(), pc.LocalAddr().String(), pc.RemoteAddr().String())
 				pc.Close()
 				return
 			}
