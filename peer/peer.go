@@ -74,7 +74,7 @@ func (p *peer) ConnectedTime() int64 {
 }
 
 func (p *peer) Start() {
-	go p.readPacket()
+	p.readPacket()
 }
 
 func (p *peer) readPacket() {

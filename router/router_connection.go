@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"hash/crc32"
+	"log"
 	"net"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ type routerPhysical interface {
 	localAddress() string
 	chainCoord() *common.Coordinate
 	removeRouterConn(conn net.Conn)
+	unsafeRemoveRouterConn(conn net.Conn)
 	port() int
 }
 
@@ -79,7 +81,7 @@ func (pc *RouterConn) checkHeartBit() {
 			time.Sleep(10 * time.Second)
 			passed := time.Now().Sub(pc.heartBitTime)
 			if passed > 25*time.Second {
-				// log.Println("no heartbit while", passed, "/", 30*time.Second, ":", pc.ID(), pc.LocalAddr().String(), pc.RemoteAddr().String())
+				log.Println("no heartbit while", passed, "/", 30*time.Second, ":", pc.ID(), pc.LocalAddr().String(), pc.RemoteAddr().String())
 				pc.Close()
 				return
 			}
@@ -291,30 +293,21 @@ func (pc *RouterConn) ReadConn() (body []byte, returnErr error) {
 }
 
 func (pc *RouterConn) readBytes(n uint32) (read []byte, returnErr error) {
-	errCh := make(chan error, 1)
+	pc.SetDeadline(time.Now().Add(time.Second * 15))
 	bs := make([]byte, n)
-	go func() {
-		_, err := util.FillBytes(pc.pConn, bs)
-		errCh <- err
-		close(errCh)
-	}()
-
-	deadTimer := time.NewTimer(10 * time.Second)
-	select {
-	case <-deadTimer.C: // timeout
+	_, err := util.FillBytes(pc.pConn, bs)
+	if err != nil { //has error
 		pc.Close()
-		return nil, ErrPeerTimeout
-	case err := <-errCh:
-		if err != nil { //has error
-			pc.Close()
-			return nil, err
-		}
-		return bs, nil
+		return nil, err
 	}
+	return bs, nil
 }
 
 func (pc *RouterConn) SendHeartBit() {
-	pc.pConn.Write([]byte{HEARTBIT})
+	_, err := pc.pConn.Write([]byte{HEARTBIT})
+	if err != nil {
+		pc.pConn.Close()
+	}
 }
 
 func (pc *RouterConn) RemoteAddr() net.Addr {
@@ -330,6 +323,14 @@ func (pc *RouterConn) Close() (err error) {
 	err = pc.pConn.Close()
 	pc.r.removeRouterConn(pc.pConn)
 	return
+}
+
+//LockFreeClose is used to sever all physical connections and logical connections related to physical connections without lock
+func (pc *RouterConn) LockFreeClose() (err error) {
+	pc.isClose = true
+	err = pc.pConn.Close()
+	pc.r.unsafeRemoveRouterConn(pc.pConn)
+	return err
 }
 
 // SetDeadline sets the read and write deadlines associated

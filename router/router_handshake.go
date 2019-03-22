@@ -135,7 +135,6 @@ func (pc *RouterConn) handshakeSend(ChainCoord *common.Coordinate) {
 func (pc *RouterConn) handshakeRecv() (*common.Coordinate, error) {
 	body, err := pc.ReadConn()
 	if err != nil {
-		pc.Close()
 		return nil, err
 	}
 
@@ -160,7 +159,6 @@ func (pc *RouterConn) handshakeRecv() (*common.Coordinate, error) {
 		pc.Address = fmt.Sprintf("%v:%v", h.Address, h.Port)
 	}
 	pc.pingTime = time.Now().Sub(time.Unix(0, int64(h.Time)))
-	err = pc.r.acceptConn(pc)
 	if err != nil {
 		return nil, err
 	}

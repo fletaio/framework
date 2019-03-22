@@ -94,7 +94,7 @@ func NewManager(ChainCoord *common.Coordinate, r router.Router, Config *Config) 
 		eventHandler:   []mesh.EventHandler{},
 		BanPeerInfos:   NewByTime(),
 	}
-	pm.peerStorage = storage.NewPeerStorage(pm.kickOutPeerStorage)
+	pm.peerStorage = storage.NewPeerStorage()
 
 	//add requestPeerList message
 	pm.MessageManager.SetCreator(peermessage.PeerListMessageType, peermessage.PeerListCreator)
@@ -102,12 +102,24 @@ func NewManager(ChainCoord *common.Coordinate, r router.Router, Config *Config) 
 	pm.RegisterEventHandler(pm)
 
 	go func() {
-		time.Sleep(10 * time.Second)
-		pm.connections.Range(func(addr string, p Peer) bool {
-			p.SendHeartBit()
-			return true
-		})
+		for {
+			time.Sleep(10 * time.Second)
+			pm.connections.Range(func(addr string, p Peer) bool {
+				p.SendHeartBit()
+				return true
+			})
+		}
 	}()
+
+	// mc := make(chan simulations.Msg)
+	// go func() {
+	// 	for {
+	// 		simulations.AddVisualizationData(pm.router.Localhost(), "peer", pm.ConnectedList)
+	// 		simulations.AddVisualizationData(pm.router.Localhost(), "ConnList", pm.router.ConnList)
+	// 		time.Sleep(time.Second)
+	// 	}
+	// }()
+	// go simulations.VisualizationStart(mc, 58080)
 
 	return pm, nil
 }
@@ -143,6 +155,9 @@ func (pm *manager) StartManage() {
 		for {
 			conn, pingTime, err := pm.router.Accept()
 			if err != nil {
+				if conn != nil {
+					conn.Close()
+				}
 				// pm.errLog(err, conn.ID())
 				continue
 			}
@@ -160,14 +175,10 @@ func (pm *manager) StartManage() {
 
 			go func(conn router.Conn) {
 				peer := newPeer(conn, pingTime, pm.deletePeer, pm.onRecvEventHandler)
-				if err != nil {
-					// pm.errLog("StartManage BeforeConnect event err ", err)
-					peer.Close()
-					return
-				}
+				defer peer.Close()
+
 				err = pm.addPeer(peer)
 				if err != nil {
-					// pm.errLog("StartManage addPeer err ", err)
 					return
 				}
 				pm.eventHandlerLock.RLock()
@@ -305,7 +316,7 @@ func (pm *manager) NodeList() []string {
 
 //ConnectedList is returns the address of the node waiting for the operation.
 func (pm *manager) ConnectedList() []string {
-	list := make([]string, 0, pm.connections.Len())
+	list := make([]string, 0)
 	pm.connections.Range(func(addr string, p Peer) bool {
 		addr = "c" + strings.Replace(addr, "testid", "", 0)
 		list = append(list, addr)
@@ -316,7 +327,7 @@ func (pm *manager) ConnectedList() []string {
 
 //candidateList is returns the address of the node waiting for the operation.
 func (pm *manager) CandidateList() []string {
-	list := make([]string, 0, len(pm.candidates.m))
+	list := make([]string, 0)
 	pm.candidates.rangeMap(func(addr string, cs candidateState) bool {
 		list = append(list, "ca"+addr+":"+strconv.Itoa(int(cs)))
 		return true
@@ -452,11 +463,16 @@ func (pm *manager) rotatePeer() {
 }
 
 func (pm *manager) appendPeerStorage() {
-	if pm.connections.Len() == 0 {
+	var len int
+	pm.connections.Range(func(k string, p Peer) bool {
+		len++
+		return true
+	})
+	if len == 0 {
 		return
 	}
 
-	if pm.connections.Len() == 1 {
+	if len == 1 {
 		pm.connections.Range(func(k string, p Peer) bool {
 			peermessage.SendRequestPeerList(p, p.LocalAddr().String())
 			return false
@@ -487,13 +503,17 @@ func (pm *manager) appendPeerStorage() {
 
 func (pm *manager) kickOutPeerStorage(ip storage.Peer) {
 	if p, ok := ip.(Peer); ok {
-		if pm.connections.Len() > storage.MaxPeerStorageLen()*2 {
+		var len int
+		pm.connections.Range(func(k string, p Peer) bool {
+			len++
+			return true
+		})
+
+		if len > storage.MaxPeerStorageLen()*2 {
 			closePeer := p
 			pm.connections.Range(func(addr string, p Peer) bool {
 				if closePeer.ConnectedTime() > p.ConnectedTime() {
-					if !pm.peerStorage.Have(addr) {
-						closePeer = p
-					}
+					closePeer = p
 				}
 				return true
 			})
@@ -503,10 +523,6 @@ func (pm *manager) kickOutPeerStorage(ip storage.Peer) {
 }
 
 func (pm *manager) deletePeer(addr string) {
-	p, has := pm.connections.Load(addr)
-	if has == true {
-		p.Remove()
-	}
 	pm.connections.Delete(addr)
 	pm.eventHandlerLock.RLock()
 	if p, has := pm.connections.Load(addr); has {
@@ -521,11 +537,10 @@ func (pm *manager) addPeer(p Peer) error {
 	pm.peerGroupLock.Lock()
 	defer pm.peerGroupLock.Unlock()
 
-	if _, has := pm.connections.Load(p.NetAddr()); has {
-		p.Close()
-		// pm.errLog("addPeer, ", ErrIsAlreadyConnected, p.ID())
-		return ErrIsAlreadyConnected
-	} else {
+	if oldP, has := pm.connections.Load(p.NetAddr()); has {
+		oldP.Close() //deletePeer, conn.Close()
+	}
+	{
 		addr := p.NetAddr()
 		pm.connections.Store(addr, p)
 		pm.nodes.Store(addr, peermessage.NewConnectInfo(addr, p.PingTime()))
@@ -579,8 +594,7 @@ func (p BanPeerInfo) String() string {
 	return fmt.Sprintf("%s Ban over %d", p.NetAddr, p.OverTime)
 }
 
-// ByTime implements sort.Interface for []Person BanPeerInfo on
-// the Timeout field.
+// ByTime implements sort.Interface for []BanPeerInfo on the Timeout field.
 type ByTime struct {
 	Arr []*BanPeerInfo
 	Map map[string]*BanPeerInfo

@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fletaio/framework/peer/peermessage"
 	"github.com/dgraph-io/badger"
+	"github.com/fletaio/framework/peer/peermessage"
 )
 
 //NodeStore is the structure of the connection information.
@@ -196,128 +196,68 @@ func (n *nodeStore) Len() int {
 
 //ConnectMap is the structure of peer list
 type connectMap struct {
-	l sync.RWMutex
-	m map[string]Peer
-}
-
-// Len returns to ConnectMap length
-func (n *connectMap) Len() int {
-	n.l.RLock()
-	defer n.l.RUnlock()
-
-	return len(n.m)
+	m sync.Map // map[string]Peer
 }
 
 // Store sets the value for a key.
 func (n *connectMap) Store(key string, value Peer) {
-	n.l.Lock()
-	defer n.l.Unlock()
-
-	if 0 == len(n.m) {
-		n.m = map[string]Peer{
-			key: value,
-		}
-	} else {
-		n.m[key] = value
-	}
+	n.m.Store(key, value)
 }
 
 // Load returns the value stored in the map for a key, or nil if no
 // value is present.
 // The ok result indicates whether value was found in the map.
 func (n *connectMap) Load(key string) (Peer, bool) {
-	n.l.RLock()
-	defer n.l.RUnlock()
-
-	v, has := n.m[key]
-	return v, has
+	i, has := n.m.Load(key)
+	if has {
+		return i.(Peer), has
+	} else {
+		return nil, has
+	}
 }
 
 // Delete deletes the value for a key.
 func (n *connectMap) Delete(key string) {
-	n.l.Lock()
-	defer n.l.Unlock()
-
-	delete(n.m, key)
+	n.m.Delete(key)
 }
 
-// Range calls f sequentially for each key and value present in the map.
-// If f returns false, range stops the iteration.
-// func (n *connectMap) Range() <-chan *peer {
-// 	arr := make([]*peer, len(n.m))
-
-// 	for _, value := range n.m {
-// 		arr = append(arr, value)
-// 	}
-// 	pch := make(chan *peer)
-// 	go func() {
-// 		for _, v := range arr {
-// 			pch <- v
-// 		}
-// 		close(pch)
-// 	}()
-// 	return pch
-// }
-
 func (n *connectMap) Range(f func(string, Peer) bool) {
-	n.l.Lock()
-	defer n.l.Unlock()
-
-	for key, value := range n.m {
-		if !f(key, value) {
-			break
-		}
-	}
+	n.m.Range(func(k, p interface{}) bool {
+		return f(k.(string), p.(Peer))
+	})
 }
 
 //CandidateMap is the structure of candidate list
 type candidateMap struct {
-	l sync.Mutex
-	m map[string]candidateState
+	m sync.Map
 }
 
 // Store sets the value for a key.
 func (n *candidateMap) store(key string, value candidateState) {
-	n.l.Lock()
-	defer n.l.Unlock()
-
-	if 0 == len(n.m) {
-		n.m = map[string]candidateState{
-			key: value,
-		}
-	} else {
-		n.m[key] = value
-	}
+	n.m.Store(key, value)
 }
 
 // Load returns the value stored in the map for a key, or nil if no
 // value is present.
 // The ok result indicates whether value was found in the map.
 func (n *candidateMap) load(key string) (candidateState, bool) {
-	n.l.Lock()
-	defer n.l.Unlock()
-
-	v, has := n.m[key]
-	return v, has
+	i, has := n.m.Load(key)
+	if has {
+		return i.(candidateState), has
+	}
+	var empty candidateState
+	return empty, has
 }
 
 // Delete deletes the value for a key.
 func (n *candidateMap) delete(key string) {
-	n.l.Lock()
-	defer n.l.Unlock()
-
-	delete(n.m, key)
+	n.m.Delete(key)
 }
 
 // Range calls f sequentially for each key and value present in the map.
 // If f returns false, range stops the iteration.
 func (n *candidateMap) rangeMap(f func(string, candidateState) bool) {
-	n.l.Lock()
-	defer n.l.Unlock()
-
-	for key, value := range n.m {
-		if !f(key, value) {
-			break
-		}
-	}
+	n.m.Range(func(k, c interface{}) bool {
+		return f(k.(string), c.(candidateState))
+	})
 }

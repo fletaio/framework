@@ -4,6 +4,7 @@ import (
 	"errors"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -14,7 +15,7 @@ var (
 
 //peer const list
 const (
-	groupLength int = 3
+	groupLength int = 5
 
 	distance1 time.Duration = time.Millisecond * 50
 	distance2 time.Duration = time.Millisecond * 250
@@ -53,7 +54,7 @@ func (a nodeList) Less(i, j int) bool {
 type peerStorage struct {
 	peerGroup map[peerGroupType]nodeList
 	peerMap   map[string]*peerInfomation
-	kickOut   kickOut
+	mapLock   sync.RWMutex
 }
 
 // PeerStorage is a list of functions to be exposed to external sources.
@@ -74,16 +75,12 @@ type Peer interface {
 // Score is the type of function that scores.
 type Score func(string) (time.Duration, bool)
 
-// KickOut is a function called when a peer is not needed.
-type kickOut func(p Peer)
-
 //NewPeerStorage is the PeerStorage creator.
-func NewPeerStorage(kickOut kickOut) PeerStorage {
+func NewPeerStorage() PeerStorage {
 	ps := &peerStorage{
 		peerGroup: map[peerGroupType]nodeList{},
 		peerMap:   map[string]*peerInfomation{},
 	}
-	ps.kickOut = kickOut
 
 	ps.peerGroup[group1] = make([]*peerInfomation, groupLength)
 	ps.peerGroup[group2] = make([]*peerInfomation, groupLength)
@@ -118,17 +115,13 @@ func (p *peerInfomation) score() (t time.Duration) {
 //Scores the peer and determines whether it is included in the group.
 func (ps *peerStorage) Add(p Peer, score Score) (inserted bool) {
 	addr := p.ID()
-	t := p.PingTime()
 
+	ps.mapLock.RLock()
 	if _, has := ps.peerMap[addr]; has {
 		ps.updatePingtime(addr)
 		return
 	}
-
-	if t > distance3 {
-		ps.kickOut(p)
-		return
-	}
+	ps.mapLock.RUnlock()
 
 	advantage := ps.getScoreBoard(score)
 	pi := &peerInfomation{
@@ -143,6 +136,9 @@ func (ps *peerStorage) Add(p Peer, score Score) (inserted bool) {
 	} else {
 		pi.group = 3
 	}
+
+	ps.mapLock.Lock()
+	defer ps.mapLock.Unlock()
 
 	return ps.insertSort(pi)
 }
@@ -194,6 +190,8 @@ func (ps *peerStorage) List() []string {
 
 //Have indicates whether the group peer is included or not.
 func (ps *peerStorage) Have(addr string) bool {
+	ps.mapLock.RLock()
+	defer ps.mapLock.RUnlock()
 	_, has := ps.peerMap[addr]
 	return has
 }
@@ -215,9 +213,6 @@ func (ps *peerStorage) insertSort(p *peerInfomation) bool {
 	} else if p.group > group2 && ps.insert(p, group2) {
 	} else if p.group > group1 && ps.insert(p, group1) {
 	} else {
-		// log.Debug("close peer ", p.p.ID())
-		ps.kickOut(p.p)
-		// p.p.Close()
 		return false
 	}
 	return true

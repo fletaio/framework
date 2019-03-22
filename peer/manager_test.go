@@ -156,7 +156,9 @@ func upVisulaization(tms []*testMessage) {
 					return func() []string { return []string{tm.ID} }
 				}(tm))
 				simulations.AddVisualizationData(tm.ID, "peer", tm.pm.ConnectedList)
-				simulations.AddVisualizationData(tm.ID, "group", tm.pm.router.ConnList)
+				simulations.AddVisualizationData(tm.ID, "rCont", tm.pm.router.ConnList)
+				simulations.AddVisualizationData(tm.ID, "wa", tm.pm.router.WaitHandshackConnList)
+				simulations.AddVisualizationData(tm.ID, "group", tm.pm.GroupList)
 				// simulations.AddVisualizationData(tm.ID, "test", tm.pm.TestList)
 			}
 			time.Sleep(time.Second)
@@ -1221,7 +1223,7 @@ func Test_manager_BroadCastContinuery(t *testing.T) {
 	testLock.Lock()
 	defer testLock.Unlock()
 	ID := int(atomic.AddInt32(&testID, 1))
-	size := 40
+	size := 20
 	path := "./test/Test_manager_BroadCast" + strconv.Itoa(ID)
 	port := testPort + ID
 
@@ -1340,8 +1342,12 @@ func Test_manager_BroadCastContinuery(t *testing.T) {
 
 			upVisulaization(tms)
 
-			for len(tms[len(tms)-1].pm.GroupList()) < 6 {
-				log.Info(len(tms[len(tms)-1].pm.GroupList()))
+			max := 6
+			if max > size-2 {
+				max = size - 2
+			}
+			for len(tms[len(tms)-1].pm.GroupList()) < max {
+				// log.Info(len(tms[len(tms)-1].pm.GroupList()))
 
 				var l string
 				for i, t := range tms {
@@ -1351,7 +1357,7 @@ func Test_manager_BroadCastContinuery(t *testing.T) {
 						l += fmt.Sprintf("%v,", tt.args.IDs[i])
 					}
 				}
-				log.Notice(l)
+				// log.Notice(l)
 				time.Sleep(time.Second)
 			}
 

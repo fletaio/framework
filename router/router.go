@@ -5,7 +5,6 @@ import (
 	"net"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/fletaio/framework/router/evilnode"
@@ -40,20 +39,20 @@ type Router interface {
 	EvilNodeManager() *evilnode.Manager
 	Conf() *Config
 	ConnList() []string
+	WaitHandshackConnList() []string
 }
 
 type router struct {
-	Config          *Config
-	ChainCoord      *common.Coordinate
-	localhost       string
-	evilNodeManager *evilnode.Manager
-	listener        net.Listener
-
-	incommingLock sync.Mutex
-
-	AcceptConnChan chan *RouterConn
-	ConnMap        map[string]*RouterConn
-	ConnMapLock    sync.RWMutex
+	Config                *Config
+	ChainCoord            *common.Coordinate
+	localhost             string
+	evilNodeManager       *evilnode.Manager
+	listener              net.Listener
+	AcceptConnChan        chan *RouterConn
+	ConnMap               map[string]*RouterConn
+	ConnMapLock           *NamedLock
+	WaitHandshackConn     map[string]struct{}
+	WaitHandshackConnLock *NamedLock
 }
 
 // NewRouter is creator of router
@@ -64,6 +63,10 @@ func NewRouter(Config *Config, ChainCoord *common.Coordinate) (Router, error) {
 		evilNodeManager: evilnode.NewManager(&Config.EvilNodeConfig),
 		AcceptConnChan:  make(chan *RouterConn),
 		ConnMap:         map[string]*RouterConn{},
+		ConnMapLock:     NewNamedLock("ConnMap"),
+
+		WaitHandshackConn:     map[string]struct{}{},
+		WaitHandshackConnLock: NewNamedLock("WaitHandshackConn"),
 	}
 	return r, nil
 }
@@ -95,8 +98,6 @@ func (r *router) Listen() error {
 //Request requests the connection by entering the address when a logical connection is required.
 //The chain coordinates support the connection between subchains.
 func (r *router) Request(addr string) error {
-	r.incommingLock.Lock()
-	defer r.incommingLock.Unlock()
 	if r.localhost != "" && strings.HasPrefix(addr, r.localhost) {
 		return ErrCannotRequestToLocal
 	}
@@ -114,9 +115,7 @@ func (r *router) Request(addr string) error {
 
 	_, err = r.incommingConn(conn, IsDial)
 	if err != nil {
-		if err == ErrCanNotConnectToEvilNode {
-			conn.Close()
-		}
+		conn.Close()
 		return err
 	}
 
@@ -148,8 +147,6 @@ func (r *router) listening() {
 	for {
 		conn, err := r.listener.Accept()
 		func(conn net.Conn) {
-			r.incommingLock.Lock()
-			defer r.incommingLock.Unlock()
 
 			if err != nil {
 				if conn != nil {
@@ -169,9 +166,21 @@ func (r *router) listening() {
 	}
 }
 
+func (r *router) WaitHandshackConnList() []string {
+	r.WaitHandshackConnLock.Lock("list")
+	defer r.WaitHandshackConnLock.Unlock()
+
+	l := []string{}
+	for k, _ := range r.WaitHandshackConn {
+		l = append(l, k)
+	}
+
+	return l
+}
+
 func (r *router) ConnList() []string {
 	s := []string{}
-	r.ConnMapLock.RLock()
+	r.ConnMapLock.RLock("ConnList")
 	for k, _ := range r.ConnMap {
 		k = "r" + strings.Replace(k, "testid", "", 0)
 		s = append(s, k)
@@ -184,7 +193,6 @@ func (r *router) incommingConn(conn net.Conn, typeis TypeIs) (*RouterConn, error
 	if r.localhost == "" {
 		r.setLocalhost(conn.LocalAddr().String())
 	}
-
 	addr := conn.RemoteAddr().String()
 	if raddr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
 		addr = raddr.IP.String()
@@ -193,18 +201,26 @@ func (r *router) incommingConn(conn net.Conn, typeis TypeIs) (*RouterConn, error
 		addr = strings.Join(addrs[:len(addrs)-1], ":")
 	}
 
+	r.WaitHandshackConnLock.Lock("check")
+	_, has := r.WaitHandshackConn[addr]
+	if !has {
+		r.WaitHandshackConn[addr] = struct{}{}
+		defer func(addr string) {
+			r.WaitHandshackConnLock.Lock("delete")
+			delete(r.WaitHandshackConn, addr)
+			r.WaitHandshackConnLock.Unlock()
+		}(addr)
+	}
+	r.WaitHandshackConnLock.Unlock()
+	if has {
+		return nil, ErrDuplicateAccept
+	}
+
 	if r.evilNodeManager.IsBanNode(addr) {
 		return nil, ErrCanNotConnectToEvilNode
 	}
 
-	r.ConnMapLock.Lock()
-	oldPConn, has := r.ConnMap[addr]
-	if has {
-		r.unsafeRemoveRouterConn(oldPConn.pConn)
-	}
 	pc := newRouterConn(addr, conn, r)
-	r.ConnMap[addr] = pc
-	r.ConnMapLock.Unlock()
 
 	errCh := make(chan error)
 	go func(pc *RouterConn) {
@@ -217,7 +233,7 @@ func (r *router) incommingConn(conn net.Conn, typeis TypeIs) (*RouterConn, error
 			cc, err = pc.handshakeRecv()
 			if err == nil {
 				if cc.Equal(r.ChainCoord) {
-					pc.handshakeSend(cc)
+					pc.handshakeSend(r.ChainCoord)
 				} else {
 					err = ErrMismatchCoordinate
 				}
@@ -227,15 +243,31 @@ func (r *router) incommingConn(conn net.Conn, typeis TypeIs) (*RouterConn, error
 	}(pc)
 
 	deadTimer := time.NewTimer(5 * time.Second)
+	var endErr error
 	select {
 	case <-deadTimer.C:
-		pc.Close()
-		return nil, ErrPeerTimeout
+		endErr = ErrPeerTimeout
 	case err := <-errCh:
 		deadTimer.Stop()
 		if err != nil {
-			return nil, err
+			endErr = err
 		}
+	}
+
+	if endErr != nil {
+		pc.Close()
+		return nil, endErr
+	}
+
+	{
+		r.ConnMapLock.Lock("incommingConn")
+		oldPConn, has := r.ConnMap[addr]
+		if has {
+			oldPConn.LockFreeClose()
+		}
+		r.ConnMap[addr] = pc
+		r.AcceptConnChan <- pc
+		r.ConnMapLock.Unlock()
 	}
 
 	return pc, nil
@@ -254,7 +286,6 @@ func (r *router) port() int {
 }
 
 func (r *router) acceptConn(pc *RouterConn) error {
-	r.AcceptConnChan <- pc
 	return nil
 }
 
@@ -268,10 +299,11 @@ func (r *router) unsafeRemoveRouterConn(conn net.Conn) {
 	}
 
 	delete(r.ConnMap, addr)
+	conn.Close()
 }
 
 func (r *router) removeRouterConn(conn net.Conn) {
-	r.ConnMapLock.Lock()
+	r.ConnMapLock.Lock("removeRouterConn")
 	defer r.ConnMapLock.Unlock()
 	r.unsafeRemoveRouterConn(conn)
 }
