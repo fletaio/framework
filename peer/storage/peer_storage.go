@@ -167,19 +167,19 @@ func (ps *peerStorage) List() []string {
 
 	index := 0
 	for _, pi := range ps.peerGroup[group1] {
-		if pi != nil {
+		if pi != nil && pi.p.IsClose() {
 			index++
 			list = append(list, strconv.Itoa(index)+":"+pi.p.ID()+":"+pi.score().String()+":"+pi.p.PingTime().String())
 		}
 	}
 	for _, pi := range ps.peerGroup[group2] {
-		if pi != nil {
+		if pi != nil && pi.p.IsClose() {
 			index++
 			list = append(list, strconv.Itoa(index)+":"+pi.p.ID()+":"+pi.score().String()+":"+pi.p.PingTime().String())
 		}
 	}
 	for _, pi := range ps.peerGroup[group3] {
-		if pi != nil {
+		if pi != nil && pi.p.IsClose() {
 			index++
 			list = append(list, strconv.Itoa(index)+":"+pi.p.ID()+":"+pi.score().String()+":"+pi.p.PingTime().String())
 		}

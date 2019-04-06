@@ -501,22 +501,22 @@ func (pm *manager) appendPeerStorage() {
 	}
 }
 
-func (pm *manager) kickOutPeerStorage(ip storage.Peer) {
-	if p, ok := ip.(Peer); ok {
-		var len int
-		pm.connections.Range(func(k string, p Peer) bool {
-			len++
+func (pm *manager) kickOutPeerStorage() {
+	var len int
+	pm.connections.Range(func(k string, p Peer) bool {
+		len++
+		return true
+	})
+
+	if len > storage.MaxPeerStorageLen()*2 {
+		var closePeer Peer
+		pm.connections.Range(func(addr string, p Peer) bool {
+			if closePeer == nil || closePeer.ConnectedTime() > p.ConnectedTime() {
+				closePeer = p
+			}
 			return true
 		})
-
-		if len > storage.MaxPeerStorageLen()*2 {
-			closePeer := p
-			pm.connections.Range(func(addr string, p Peer) bool {
-				if closePeer.ConnectedTime() > p.ConnectedTime() {
-					closePeer = p
-				}
-				return true
-			})
+		if closePeer != nil {
 			closePeer.Close()
 		}
 	}
@@ -540,6 +540,8 @@ func (pm *manager) addPeer(p Peer) error {
 	if oldP, has := pm.connections.Load(p.NetAddr()); has {
 		oldP.Close() //deletePeer, conn.Close()
 	}
+
+	pm.kickOutPeerStorage()
 	{
 		addr := p.NetAddr()
 		pm.connections.Store(addr, p)

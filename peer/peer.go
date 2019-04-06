@@ -85,7 +85,6 @@ func (p *peer) readPacket() {
 		t, n, err := util.ReadUint64(p)
 		if n != 0 && message.NameOfType(message.Type(t)) == "" {
 			log.Error("not defind message type recived", t)
-			p.Close()
 			return
 		}
 		if err != nil {

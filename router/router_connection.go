@@ -297,7 +297,6 @@ func (pc *RouterConn) readBytes(n uint32) (read []byte, returnErr error) {
 	bs := make([]byte, n)
 	_, err := util.FillBytes(pc.pConn, bs)
 	if err != nil { //has error
-		pc.Close()
 		return nil, err
 	}
 	return bs, nil

@@ -156,7 +156,7 @@ func upVisulaization(tms []*testMessage) {
 					return func() []string { return []string{tm.ID} }
 				}(tm))
 				simulations.AddVisualizationData(tm.ID, "peer", tm.pm.ConnectedList)
-				simulations.AddVisualizationData(tm.ID, "rCont", tm.pm.router.ConnList)
+				// simulations.AddVisualizationData(tm.ID, "rCont", tm.pm.router.ConnList)
 				simulations.AddVisualizationData(tm.ID, "wa", tm.pm.router.WaitHandshackConnList)
 				simulations.AddVisualizationData(tm.ID, "group", tm.pm.GroupList)
 				// simulations.AddVisualizationData(tm.ID, "test", tm.pm.TestList)
