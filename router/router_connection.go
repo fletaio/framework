@@ -80,8 +80,8 @@ func (pc *RouterConn) checkHeartBit() {
 		for {
 			time.Sleep(3 * time.Second)
 			passed := time.Now().Sub(pc.heartBitTime)
-			if passed > 5*time.Second {
-				log.Println("no heartbit while", passed, "/", 5*time.Second, ":", pc.ID(), pc.LocalAddr().String(), pc.RemoteAddr().String())
+			if passed > 15*time.Second {
+				log.Println("no heartbit while", passed, "/", 15*time.Second, ":", pc.ID(), pc.LocalAddr().String(), pc.RemoteAddr().String())
 				pc.Close()
 				return
 			}
