@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fletaio/framework/chain/mesh"
+	"github.com/fletaio/framework/peer"
 )
 
 // RequestExpireHandler handles a request expire event
@@ -38,13 +38,14 @@ func (rm *RequestTimer) Exist(height uint32) bool {
 }
 
 // Add adds the timer of the request
-func (rm *RequestTimer) Add(height uint32, t time.Duration, ID string) {
+func (rm *RequestTimer) Add(height uint32, t time.Duration, p interface{}, ID string) {
 	rm.Lock()
 	defer rm.Unlock()
 
 	rm.timerMap[height] = &requestTimerItem{
 		Height:    height,
 		ExpiredAt: uint64(time.Now().UnixNano()) + uint64(t),
+		P:         p,
 		ID:        ID,
 	}
 }
@@ -68,7 +69,7 @@ func (rm *RequestTimer) Run() {
 			remainMap := map[uint32]*requestTimerItem{}
 			rm.Lock()
 			for h, v := range rm.timerMap {
-				if v.ExpiredAt <= now {
+				if v.ExpiredAt <= now || rm.isClose(v.P) {
 					expired = append(expired, v)
 				} else {
 					remainMap[h] = v
@@ -87,9 +88,19 @@ func (rm *RequestTimer) Run() {
 	}
 }
 
+func (rm *RequestTimer) isClose(r interface{}) bool {
+	if r == nil {
+		return false
+	}
+	if p, ok := r.(peer.Peer); ok {
+		return p.IsClose()
+	}
+	return false
+}
+
 type requestTimerItem struct {
 	Height    uint32
 	ExpiredAt uint64
-	P         mesh.Peer
+	P         interface{}
 	ID        string
 }
