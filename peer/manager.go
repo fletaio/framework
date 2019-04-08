@@ -103,7 +103,7 @@ func NewManager(ChainCoord *common.Coordinate, r router.Router, Config *Config) 
 
 	go func() {
 		for {
-			time.Sleep(10 * time.Second)
+			time.Sleep(3 * time.Second)
 			pm.connections.Range(func(addr string, p Peer) bool {
 				p.SendHeartBit()
 				return true

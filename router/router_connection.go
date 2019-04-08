@@ -78,10 +78,10 @@ func newRouterConn(addr string, conn net.Conn, r routerPhysical) *RouterConn {
 func (pc *RouterConn) checkHeartBit() {
 	go func() {
 		for {
-			time.Sleep(10 * time.Second)
+			time.Sleep(3 * time.Second)
 			passed := time.Now().Sub(pc.heartBitTime)
-			if passed > 25*time.Second {
-				log.Println("no heartbit while", passed, "/", 30*time.Second, ":", pc.ID(), pc.LocalAddr().String(), pc.RemoteAddr().String())
+			if passed > 5*time.Second {
+				log.Println("no heartbit while", passed, "/", 5*time.Second, ":", pc.ID(), pc.LocalAddr().String(), pc.RemoteAddr().String())
 				pc.Close()
 				return
 			}
