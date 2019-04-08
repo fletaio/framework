@@ -258,7 +258,7 @@ func (cm *Manager) tryRequestData(Count uint32) {
 						if err := p.Send(sm); err != nil {
 							cm.Mesh.Remove(p.NetAddr())
 						} else {
-							cm.requestTimer.Add(TargetHeight, 5*time.Second, p.ID())
+							cm.requestTimer.Add(TargetHeight, 5*time.Second, p, p.ID())
 							break
 						}
 					}

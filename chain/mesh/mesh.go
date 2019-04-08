@@ -20,4 +20,5 @@ type Peer interface {
 	message.Sender
 	ID() string
 	NetAddr() string
+	IsClose() bool
 }
