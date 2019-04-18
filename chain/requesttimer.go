@@ -69,7 +69,7 @@ func (rm *RequestTimer) Run() {
 			remainMap := map[uint32]*requestTimerItem{}
 			rm.Lock()
 			for h, v := range rm.timerMap {
-				if v.ExpiredAt <= now || rm.isClose(v.P) {
+				if v.ExpiredAt <= now {
 					expired = append(expired, v)
 				} else {
 					remainMap[h] = v
